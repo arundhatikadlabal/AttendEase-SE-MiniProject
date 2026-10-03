@@ -1,6 +1,6 @@
 # AttendEase – Student Attendance Management System
 
-A web-based attendance management system built for the PES University Software Engineering Level 3 Mini-Project (Course UE24CS341A). AttendEase lets administrators configure courses and sections, faculty mark attendance and manage correction requests, and students track their own attendance — all through role-based web portals.
+A web-based attendance management system built for the PES University Software Engineering Level 3 Mini-Project (Course UE24CS341A). AttendEase lets administrators configure courses and sections, faculty mark attendance and manage correction requests, and students track their own attendance, all through role-based web portals.
 
 ## Team 3
 
