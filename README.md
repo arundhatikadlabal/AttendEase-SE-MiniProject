@@ -1,6 +1,6 @@
 # AttendEase – Student Attendance Management System
 
-A web-based attendance management system built for the PES University Software Engineering Level 3 Mini-Project (Course UE24CS341A). AttendEase lets administrators configure courses and sections, faculty mark attendance and manage correction requests, and students track their own attendance ,all through role-based web portals.
+A web-based attendance management system built for the PES University Software Engineering Level 3 Mini-Project (Course UE24CS341A). AttendEase lets administrators configure courses and sections, faculty mark attendance and manage correction requests, and students track their own attendance — all through role-based web portals.
 
 ## Team 3
 
@@ -34,7 +34,7 @@ AttendEase addresses the manual, error-prone process of attendance tracking in a
 
 ```
 .
-├── project-documentation/
+├── AttendEase_Deliverables/
 │   ├── AttendEase_SRS.pdf
 │   ├── AttendEase_SAD.pdf
 │   ├── AttendEase_TestPlan.pdf
@@ -46,10 +46,10 @@ AttendEase addresses the manual, error-prone process of attendance tracking in a
 
 | Document | Description |
 |---|---|
-| [SRS](project-documentation/AttendEase_SRS.pdf) | Software Requirements Specification — 38 functional requirements, 8 non-functional requirements, UML use-case diagram, security objectives & requirements |
-| [SAD](project-documentation/AttendEase_SAD.pdf) | Software Architecture & Design Specification — component architecture, UML sequence diagrams, API design, security architecture |
-| [Test Plan](project-documentation/AttendEase_TestPlan.pdf) | Software Test Plan — test strategy, security validation, 12 traceable test cases |
-| [Combined Submission PDF](project-documentation/AttendEase_Combined_SRS_SAD_TestPlan.pdf) | SRS + SAD + Test Plan merged for final submission |
+| [SRS](AttendEase_Deliverables/AttendEase_SRS.pdf) | Software Requirements Specification — 38 functional requirements, 8 non-functional requirements, UML use-case diagram, security objectives & requirements |
+| [SAD](AttendEase_Deliverables/AttendEase_SAD.pdf) | Software Architecture & Design Specification — component architecture, UML sequence diagrams, API design, security architecture |
+| [Test Plan](AttendEase_Deliverables/AttendEase_TestPlan.pdf) | Software Test Plan — test strategy, security validation, 12 traceable test cases |
+| [Combined Submission PDF](AttendEase_Deliverables/AttendEase_Combined_SRS_SAD_TestPlan.pdf) | SRS + SAD + Test Plan merged for final submission |
 
 ## Methodology
 
