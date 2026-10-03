@@ -37,8 +37,8 @@ AttendEase addresses the manual, error-prone process of attendance tracking in a
 ├── AttendEase_Deliverables/
 │   ├── AttendEase_SRS.pdf
 │   ├── AttendEase_SAD.pdf
-│   ├── AttendEase_TestPlan.pdf
-│   └── AttendEase_Combined_SRS_SAD_TestPlan.pdf
+│   └── AttendEase_TestPlan.pdf
+├── AttendEase_Combined_SRS_SAD_TestPlan.pdf
 └── README.md
 ```
 
@@ -49,7 +49,7 @@ AttendEase addresses the manual, error-prone process of attendance tracking in a
 | [SRS](AttendEase_Deliverables/AttendEase_SRS.pdf) | Software Requirements Specification — 38 functional requirements, 8 non-functional requirements, UML use-case diagram, security objectives & requirements |
 | [SAD](AttendEase_Deliverables/AttendEase_SAD.pdf) | Software Architecture & Design Specification — component architecture, UML sequence diagrams, API design, security architecture |
 | [Test Plan](AttendEase_Deliverables/AttendEase_TestPlan.pdf) | Software Test Plan — test strategy, security validation, 12 traceable test cases |
-| [Combined Submission PDF](AttendEase_Deliverables/AttendEase_Combined_SRS_SAD_TestPlan.pdf) | SRS + SAD + Test Plan merged for final submission |
+| [Combined Submission PDF](AttendEase_Combined_SRS_SAD_TestPlan.pdf) | SRS + SAD + Test Plan merged for final submission |
 
 ## Methodology
 
