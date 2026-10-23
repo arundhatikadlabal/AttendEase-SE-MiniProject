@@ -1,0 +1,22 @@
+
+name: AttendEase CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate project
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Report repository status
+        run: |
+          echo "AttendEase CI workflow started."
+          echo "Checking the current repository contents."
+          ls -la
