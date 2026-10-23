@@ -1,7 +1,7 @@
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from .models import AttendanceRecord, AttendanceSession
+from .models import AttendanceRecord, AttendanceSession, Enrollment
 
 
 def calculate_attendance_percentage(student, course):
@@ -37,3 +37,32 @@ def calculate_attendance_percentage(student, course):
         Decimal("0.01"),
         rounding=ROUND_HALF_UP,
     )
+
+
+def identify_students_below_threshold(course):
+    """
+    Return enrolled students whose attendance is below the course threshold.
+
+    Each result contains the student, attendance percentage, and threshold.
+    """
+    threshold = course.shortage_threshold
+    results = []
+
+    enrollments = Enrollment.objects.filter(
+        section__course=course,
+    ).select_related("student").distinct()
+
+    for enrollment in enrollments:
+        student = enrollment.student
+        percentage = calculate_attendance_percentage(student, course)
+
+        if percentage < threshold:
+            results.append(
+                {
+                    "student": student,
+                    "attendance_percentage": percentage,
+                    "threshold": threshold,
+                }
+            )
+
+    return results
