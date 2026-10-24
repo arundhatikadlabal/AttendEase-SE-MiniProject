@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from analytics.models import Section
 from users.models import User
 
 from .models import Timetable
@@ -36,6 +37,14 @@ class TimetableSlotSerializer(serializers.Serializer):
                 {"end_time": "End time must be after start time."}
             )
         return attrs
+
+
+class AssignmentSerializer(serializers.Serializer):
+    section_id = serializers.PrimaryKeyRelatedField(
+        queryset=Section.objects.all(),
+        error_messages={"does_not_exist": "No section exists with this id."},
+    )
+    faculty_id = _active_users(User.Role.FACULTY, "faculty member")
 
 
 def person_data(user):

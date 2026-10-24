@@ -479,3 +479,92 @@ class TimetableTests(AcademicTestCase):
                 start_time=time(10, 30),
                 end_time=time(11, 30),
             )
+
+
+class FacultyAssignmentTests(AcademicTestCase):
+    """FR-013: administrators assign a faculty member to a section."""
+
+    def setUp(self):
+        super().setUp()
+        self.section = self.make_section(self.make_course())
+        self.url = reverse("academic-assignments")
+
+    def test_tc03_admin_assigns_faculty_who_then_sees_section(self):
+        """TC-03: assignment saved; faculty sees the section on their dashboard."""
+        self.assertIsNone(self.section.faculty)
+
+        response = self.jwt_client(self.admin).post(
+            self.url, {"section_id": self.section.pk, "faculty_id": self.faculty.pk}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["faculty"]["id"], self.faculty.pk)
+        self.section.refresh_from_db()
+        self.assertEqual(self.section.faculty, self.faculty)
+
+        dashboard = self.jwt_client(self.faculty).get(reverse("academic-my-sections"))
+
+        self.assertEqual(dashboard.status_code, 200)
+        [listed] = dashboard.json()
+        self.assertEqual(listed["id"], self.section.pk)
+        self.assertEqual(listed["course"]["code"], "CS101")
+
+    def test_fr013_reassignment_moves_section_between_faculty(self):
+        self.section.faculty = self.faculty
+        self.section.save()
+
+        response = self.as_user(self.admin).post(
+            self.url, {"section_id": self.section.pk, "faculty_id": self.other_faculty.pk}
+        )
+        previous = self.as_user(self.faculty).get(reverse("academic-my-sections"))
+        current = self.as_user(self.other_faculty).get(reverse("academic-my-sections"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(previous.json(), [])
+        self.assertEqual([s["id"] for s in current.json()], [self.section.pk])
+
+    def test_fr013_only_faculty_accounts_can_be_assigned(self):
+        response = self.as_user(self.admin).post(
+            self.url, {"section_id": self.section.pk, "faculty_id": self.student.pk}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("faculty_id", response.json())
+        self.section.refresh_from_db()
+        self.assertIsNone(self.section.faculty)
+
+    def test_fr013_unknown_section_is_rejected(self):
+        response = self.as_user(self.admin).post(
+            self.url, {"section_id": 9999, "faculty_id": self.faculty.pk}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("section_id", response.json())
+
+    def test_fr013_non_admin_cannot_assign_faculty(self):
+        with self.assertLogs("users.permissions", level="WARNING"):
+            response = self.as_user(self.faculty).post(
+                self.url, {"section_id": self.section.pk, "faculty_id": self.faculty.pk}
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.section.refresh_from_db()
+        self.assertIsNone(self.section.faculty)
+
+    def test_fr013_service_rejects_non_faculty(self):
+        with self.assertRaises(ValueError):
+            services.assign_faculty(section=self.section, faculty=self.student)
+
+    def test_enrolled_student_sees_section_in_my_sections(self):
+        Enrollment.objects.create(section=self.section, student=self.student)
+
+        response = self.as_user(self.student).get(reverse("academic-my-sections"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([s["id"] for s in response.json()], [self.section.pk])
+
+    def test_admins_have_no_personal_section_list(self):
+        with self.assertLogs("users.permissions", level="WARNING"):
+            response = self.as_user(self.admin).get(reverse("academic-my-sections"))
+
+        self.assertEqual(response.status_code, 403)

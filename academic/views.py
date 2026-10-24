@@ -11,6 +11,7 @@ from users.models import User
 from . import services
 from .models import Timetable
 from .serializers import (
+    AssignmentSerializer,
     CourseSerializer,
     EnrollmentSerializer,
     SectionSerializer,
@@ -201,3 +202,33 @@ class TimetableSlotDetailView(APIView):
     def delete(self, request, slot_id):
         get_object_or_404(Timetable, pk=slot_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AssignmentView(APIView):
+    """FR-013: admins assign a faculty member to a course-section."""
+
+    allowed_roles = ADMIN_ONLY
+
+    def post(self, request):
+        serializer = AssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        section = services.assign_faculty(
+            section=serializer.validated_data["section_id"],
+            faculty=serializer.validated_data["faculty_id"],
+        )
+        section = sections_queryset().get(pk=section.pk)
+        return Response(section_data(section, include_course=True))
+
+
+class MySectionsView(APIView):
+    """Sections the caller teaches (faculty) or is enrolled in (student)."""
+
+    allowed_roles = (User.Role.STUDENT, User.Role.FACULTY)
+
+    def get(self, request):
+        return Response(
+            [
+                section_data(section, include_course=True)
+                for section in services.sections_for_user(request.user)
+            ]
+        )

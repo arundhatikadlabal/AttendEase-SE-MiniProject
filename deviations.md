@@ -35,3 +35,32 @@ Running log of places where the implementation differs from, or makes a decision
 **Why:** A case-sensitive check would let `A` and `a` exist side by side. Users can't tell those apart on a roster or report, which defeats the purpose of FR-011.
 
 **Introduced in:** `feature/fr-007-section-management` (upper-case normalisation) and `feature/fr-011-duplicate-section-validation` (the 409 duplicate check).
+
+### D-04: Academic endpoints beyond the SAD's API table (FR-006 to FR-013)
+
+**Documents:** SAD §4.3 lists only `GET /api/academic/courses` and `POST /api/academic/assignments` for academic setup, and says the remaining endpoints follow the same conventions.
+
+**Implementation:** These endpoints were added to cover FR-006 to FR-009 and TC-03:
+- `courses/{id}`
+- `courses/{id}/sections`
+- `sections/{id}`
+- `sections/{id}/enrollments[/{student_id}]`
+- `sections/{id}/timetable`
+- `timetable/{id}`
+- `my-sections`
+
+They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns the sections a faculty member teaches or a student is enrolled in. It lets the API demonstrate TC-03's expected result ("faculty sees the section on their dashboard") until the faculty web UI exists.
+
+**Introduced in:** `feature/fr-006-course-management` through `feature/fr-013-faculty-assignment`.
+
+### D-05: Course, Section and Enrollment stay in the `analytics` app (FR-006 to FR-013)
+
+**Documents:** SAD §3.4 assigns course, section and timetable management to the Academic Setup API & Service.
+
+**Implementation:**
+- **Models stay in `analytics`.** `Course`, `Section` and `Enrollment` were already defined in `analytics/models.py`, and the FR-029/FR-030 attendance calculations read from them. The `academic` app provides the API and service layer over those models instead of defining its own. Only the new `Timetable` model lives in `academic`.
+- **Faculty is optional when a section is created.** `analytics.Section.faculty` was made nullable (migration `analytics/0002`), so a section can exist before an administrator assigns a faculty member. This keeps FR-007 (create section) and FR-013 (assign faculty) separate. Nothing in `analytics` reads `Section.faculty`.
+
+**Why:** A second copy of these tables would split enrollment data between two apps. Moving the models into `academic` is possible later, as a migration agreed with the analytics owner.
+
+**Introduced in:** `feature/fr-006-course-management` (reuse) and `feature/fr-007-section-management` (nullable faculty).
