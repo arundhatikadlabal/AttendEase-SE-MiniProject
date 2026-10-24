@@ -66,7 +66,7 @@ class CourseDetailView(APIView):
 
 
 class CourseSectionListView(APIView):
-    """FR-007: list or create sections within a course."""
+    """FR-007 / FR-011: list or create sections within a course."""
 
     roles_by_method = {"GET": ANY_ROLE, "POST": ADMIN_ONLY}
 
@@ -80,13 +80,16 @@ class CourseSectionListView(APIView):
         course = get_object_or_404(Course, pk=course_id)
         serializer = SectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        section = services.create_section(course=course, **serializer.validated_data)
+        try:
+            section = services.create_section(course=course, **serializer.validated_data)
+        except services.AcademicConflict as error:
+            return conflict_response(error)
         section = sections_queryset().get(pk=section.pk)
         return Response(section_data(section, include_course=True), status=status.HTTP_201_CREATED)
 
 
 class SectionDetailView(APIView):
-    """FR-007: view or rename a section."""
+    """FR-007 / FR-011: view or rename a section."""
 
     roles_by_method = {"GET": ANY_ROLE, "PATCH": ADMIN_ONLY}
 
@@ -98,6 +101,9 @@ class SectionDetailView(APIView):
         section = get_object_or_404(Section.objects.select_related("course"), pk=section_id)
         serializer = SectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        services.update_section(section, **serializer.validated_data)
+        try:
+            services.update_section(section, **serializer.validated_data)
+        except services.AcademicConflict as error:
+            return conflict_response(error)
         section = sections_queryset().get(pk=section.pk)
         return Response(section_data(section, include_course=True))
