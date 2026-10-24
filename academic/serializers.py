@@ -1,5 +1,14 @@
 from rest_framework import serializers
 
+from users.models import User
+
+
+def _active_users(role, label):
+    return serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role=role, is_active=True),
+        error_messages={"does_not_exist": f"No active {label} exists with this id."},
+    )
+
 
 class CourseSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=20)
@@ -8,6 +17,10 @@ class CourseSerializer(serializers.Serializer):
 
 class SectionSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=20)
+
+
+class EnrollmentSerializer(serializers.Serializer):
+    student_id = _active_users(User.Role.STUDENT, "student")
 
 
 def person_data(user):

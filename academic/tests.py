@@ -4,7 +4,9 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from analytics.models import Course, Section
+from analytics.models import Course, Enrollment, Section
+
+from . import services
 
 PASSWORD = "StrongPass123!"
 
@@ -278,3 +280,94 @@ class DuplicateSectionCodeTests(AcademicTestCase):
     def test_fr011_database_enforces_unique_section_code(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
             Section.objects.create(course=self.course, code="A")
+
+
+class EnrollmentTests(AcademicTestCase):
+    """FR-008: administrators enroll students into a section."""
+
+    def setUp(self):
+        super().setUp()
+        self.section = self.make_section(self.make_course(), faculty=self.faculty)
+        self.url = reverse("academic-section-enrollments", args=[self.section.pk])
+
+    def test_fr008_admin_enrolls_student(self):
+        response = self.as_user(self.admin).post(self.url, {"student_id": self.student.pk})
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["student"]["id"], self.student.pk)
+        self.assertTrue(
+            Enrollment.objects.filter(section=self.section, student=self.student).exists()
+        )
+
+    def test_fr008_duplicate_enrollment_is_rejected(self):
+        Enrollment.objects.create(section=self.section, student=self.student)
+
+        response = self.as_user(self.admin).post(self.url, {"student_id": self.student.pk})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("student_id", response.json())
+        self.assertEqual(Enrollment.objects.count(), 1)
+
+    def test_fr008_only_student_accounts_can_be_enrolled(self):
+        response = self.as_user(self.admin).post(self.url, {"student_id": self.faculty.pk})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("student_id", response.json())
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_fr008_inactive_student_cannot_be_enrolled(self):
+        self.student.is_active = False
+        self.student.save()
+
+        response = self.as_user(self.admin).post(self.url, {"student_id": self.student.pk})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_fr008_unknown_section_returns_404(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-section-enrollments", args=[9999]),
+            {"student_id": self.student.pk},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_fr008_roster_visible_to_admin_and_assigned_faculty_only(self):
+        Enrollment.objects.create(section=self.section, student=self.student)
+
+        admin_view = self.as_user(self.admin).get(self.url)
+        faculty_view = self.as_user(self.faculty).get(self.url)
+        other_faculty_view = self.as_user(self.other_faculty).get(self.url)
+        with self.assertLogs("users.permissions", level="WARNING"):
+            student_view = self.as_user(self.student).get(self.url)
+
+        self.assertEqual(admin_view.status_code, 200)
+        self.assertEqual([s["id"] for s in admin_view.json()], [self.student.pk])
+        self.assertEqual(faculty_view.status_code, 200)
+        self.assertEqual(other_faculty_view.status_code, 403)
+        self.assertEqual(student_view.status_code, 403)
+
+    def test_fr008_non_admin_cannot_enroll(self):
+        with self.assertLogs("users.permissions", level="WARNING"):
+            response = self.as_user(self.faculty).post(
+                self.url, {"student_id": self.student.pk}
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_fr008_admin_unenrolls_student(self):
+        Enrollment.objects.create(section=self.section, student=self.student)
+        url = reverse(
+            "academic-section-enrollment", args=[self.section.pk, self.student.pk]
+        )
+
+        first = self.as_user(self.admin).delete(url)
+        second = self.client.delete(url)
+
+        self.assertEqual(first.status_code, 204)
+        self.assertEqual(second.status_code, 404)
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_fr008_service_rejects_non_student(self):
+        with self.assertRaises(ValueError):
+            services.enroll_student(section=self.section, student=self.faculty)
