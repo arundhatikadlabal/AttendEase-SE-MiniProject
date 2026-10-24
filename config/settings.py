@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "analytics",
     "users",
+    "academic",
 ]
 
 AUTH_USER_MODEL = "users.User"
