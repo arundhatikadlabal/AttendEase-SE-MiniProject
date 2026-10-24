@@ -27,6 +27,8 @@ class Section(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="teaching_sections",
+        null=True,
+        blank=True,
     )
 
     class Meta:
