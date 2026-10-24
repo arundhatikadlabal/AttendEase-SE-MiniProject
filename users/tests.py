@@ -156,3 +156,49 @@ class RoleAccessTests(TestCase):
 
         self.assertEqual(authorized.status_code, 200)
         self.assertEqual(authorized.json()["role"], "student")
+
+
+class LogoutTests(TestCase):
+    def setUp(self):
+        get_user_model().objects.create_user(
+            email="logout@example.com", name="Logout Student", role="student", password="Pass123!"
+        )
+        login = self.client.post(
+            reverse("login"), {"email": "logout@example.com", "password": "Pass123!"}
+        )
+        self.assertEqual(login.status_code, 200)
+        self.access = login.json()["access"]
+        self.refresh = login.json()["refresh"]
+
+    def test_fr005_logout_revokes_access_and_refresh_tokens(self):
+        before = self.client.get(reverse("me"), HTTP_AUTHORIZATION=f"Bearer {self.access}")
+        self.assertEqual(before.status_code, 200)
+
+        logout = self.client.post(reverse("logout"), HTTP_AUTHORIZATION=f"Bearer {self.access}")
+        self.assertEqual(logout.status_code, 204)
+        self.assertEqual(
+            self.client.get(reverse("me"), HTTP_AUTHORIZATION=f"Bearer {self.access}").status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(reverse("refresh"), {"refresh": self.refresh}).status_code, 401
+        )
+
+        new_login = self.client.post(
+            reverse("login"), {"email": "logout@example.com", "password": "Pass123!"}
+        )
+        self.assertEqual(new_login.status_code, 200)
+        self.assertEqual(
+            self.client.get(
+                reverse("me"), HTTP_AUTHORIZATION=f"Bearer {new_login.json()['access']}"
+            ).status_code,
+            200,
+        )
+
+    def test_refresh_works_before_logout(self):
+        response = self.client.post(reverse("refresh"), {"refresh": self.refresh})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.json())
+
+    def test_logout_requires_authentication(self):
+        self.assertEqual(self.client.post(reverse("logout")).status_code, 401)
