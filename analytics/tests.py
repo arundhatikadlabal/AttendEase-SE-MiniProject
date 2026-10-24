@@ -20,11 +20,15 @@ class AttendancePercentageTests(TestCase):
         User = get_user_model()
 
         self.student = User.objects.create_user(
-            username="student1",
+            email="student1@example.com",
+            name="Student One",
+            role="student",
             password="test-password",
         )
         self.faculty = User.objects.create_user(
-            username="faculty1",
+            email="faculty1@example.com",
+            name="Faculty One",
+            role="faculty",
             password="test-password",
         )
         self.course = Course.objects.create(
