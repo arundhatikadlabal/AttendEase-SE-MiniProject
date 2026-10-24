@@ -7,6 +7,8 @@ from .views import (
     SectionDetailView,
     SectionEnrollmentDetailView,
     SectionEnrollmentListView,
+    SectionTimetableView,
+    TimetableSlotDetailView,
 )
 
 urlpatterns = [
@@ -27,5 +29,15 @@ urlpatterns = [
         "sections/<int:section_id>/enrollments/<int:student_id>",
         SectionEnrollmentDetailView.as_view(),
         name="academic-section-enrollment",
+    ),
+    path(
+        "sections/<int:section_id>/timetable",
+        SectionTimetableView.as_view(),
+        name="academic-section-timetable",
+    ),
+    path(
+        "timetable/<int:slot_id>",
+        TimetableSlotDetailView.as_view(),
+        name="academic-timetable-slot",
     ),
 ]
