@@ -1,14 +1,22 @@
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from analytics.models import Course, Section
+from analytics.models import Course, Enrollment, Section
 from users.models import User
 
 from . import services
-from .serializers import CourseSerializer, SectionSerializer, course_data, section_data
+from .serializers import (
+    CourseSerializer,
+    EnrollmentSerializer,
+    SectionSerializer,
+    course_data,
+    person_data,
+    section_data,
+)
 
 ANY_ROLE = (User.Role.STUDENT, User.Role.FACULTY, User.Role.ADMIN)
 ADMIN_ONLY = (User.Role.ADMIN,)
@@ -107,3 +115,50 @@ class SectionDetailView(APIView):
             return conflict_response(error)
         section = sections_queryset().get(pk=section.pk)
         return Response(section_data(section, include_course=True))
+
+
+class SectionEnrollmentListView(APIView):
+    """FR-008: admins enroll students; admins and the section's faculty see the list."""
+
+    roles_by_method = {"GET": (User.Role.FACULTY, User.Role.ADMIN), "POST": ADMIN_ONLY}
+
+    def get(self, request, section_id):
+        section = get_object_or_404(Section, pk=section_id)
+        if request.user.role == User.Role.FACULTY and section.faculty_id != request.user.pk:
+            raise PermissionDenied("You are not assigned to this section.")
+        enrollments = (
+            Enrollment.objects.filter(section=section)
+            .select_related("student")
+            .order_by("student__name", "student__email")
+        )
+        return Response([person_data(enrollment.student) for enrollment in enrollments])
+
+    def post(self, request, section_id):
+        section = get_object_or_404(Section, pk=section_id)
+        serializer = EnrollmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        student = serializer.validated_data["student_id"]
+        try:
+            services.enroll_student(section=section, student=student)
+        except services.AcademicConflict as error:
+            return conflict_response(error)
+        return Response(
+            {"section_id": section.pk, "student": person_data(student)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SectionEnrollmentDetailView(APIView):
+    """FR-008: admins remove a student from a section."""
+
+    allowed_roles = ADMIN_ONLY
+
+    def delete(self, request, section_id, student_id):
+        section = get_object_or_404(Section, pk=section_id)
+        student = get_object_or_404(User, pk=student_id)
+        if not services.unenroll_student(section=section, student=student):
+            return Response(
+                {"detail": "This student is not enrolled in this section."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
