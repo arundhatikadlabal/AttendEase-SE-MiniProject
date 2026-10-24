@@ -5,6 +5,8 @@ from django.db import IntegrityError, transaction
 from analytics.models import Course, Enrollment, Section
 from users.models import User
 
+from .models import Timetable
+
 
 class AcademicConflict(Exception):
     """A write would break a uniqueness or scheduling rule; mapped to HTTP 409."""
@@ -114,3 +116,30 @@ def unenroll_student(*, section, student):
     """FR-008: remove a student from a section. Returns False if not enrolled."""
     deleted, _ = Enrollment.objects.filter(section=section, student=student).delete()
     return deleted > 0
+
+
+OVERLAP_MESSAGE = "This period overlaps an existing period for this section."
+
+
+def add_timetable_slot(*, section, day_of_week, start_time, end_time):
+    """FR-009: add a weekly period, rejecting overlaps within the same section."""
+    if end_time <= start_time:
+        raise ValueError("end_time must be after start_time")
+    overlapping = Timetable.objects.filter(
+        section=section,
+        day_of_week=day_of_week,
+        start_time__lt=end_time,
+        end_time__gt=start_time,
+    )
+    if overlapping.exists():
+        raise AcademicConflict("start_time", OVERLAP_MESSAGE)
+    try:
+        with transaction.atomic():
+            return Timetable.objects.create(
+                section=section,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+    except IntegrityError as error:
+        raise AcademicConflict("start_time", OVERLAP_MESSAGE) from error

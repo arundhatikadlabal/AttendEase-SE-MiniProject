@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -7,6 +9,7 @@ from rest_framework.test import APIClient
 from analytics.models import Course, Enrollment, Section
 
 from . import services
+from .models import Timetable
 
 PASSWORD = "StrongPass123!"
 
@@ -371,3 +374,108 @@ class EnrollmentTests(AcademicTestCase):
     def test_fr008_service_rejects_non_student(self):
         with self.assertRaises(ValueError):
             services.enroll_student(section=self.section, student=self.faculty)
+
+
+class TimetableTests(AcademicTestCase):
+    """FR-009: administrators define a weekly timetable per section."""
+
+    def setUp(self):
+        super().setUp()
+        self.section = self.make_section(self.make_course())
+        self.url = reverse("academic-section-timetable", args=[self.section.pk])
+
+    def add_slot(self, day, start, end, section_url=None):
+        return self.as_user(self.admin).post(
+            section_url or self.url,
+            {"day_of_week": day, "start_time": start, "end_time": end},
+        )
+
+    def test_fr009_admin_defines_weekly_timetable(self):
+        friday = self.add_slot(5, "14:00", "15:00")
+        monday = self.add_slot(1, "09:00", "10:00")
+
+        self.assertEqual(friday.status_code, 201)
+        self.assertEqual(monday.status_code, 201)
+        self.assertEqual(monday.json()["day_name"], "Monday")
+
+        listed = self.as_user(self.student).get(self.url)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(
+            [(s["day_of_week"], s["start_time"], s["end_time"]) for s in listed.json()],
+            [(1, "09:00", "10:00"), (5, "14:00", "15:00")],
+        )
+        section = self.as_user(self.faculty).get(
+            reverse("academic-section", args=[self.section.pk])
+        )
+        self.assertEqual(len(section.json()["timetable"]), 2)
+
+    def test_fr009_end_time_must_follow_start_time(self):
+        response = self.add_slot(1, "10:00", "09:00")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("end_time", response.json())
+        self.assertFalse(Timetable.objects.exists())
+
+    def test_fr009_invalid_day_is_rejected(self):
+        self.assertEqual(self.add_slot(8, "09:00", "10:00").status_code, 400)
+
+    def test_fr009_overlapping_period_in_same_section_is_rejected(self):
+        self.add_slot(1, "09:00", "10:00")
+
+        overlap = self.add_slot(1, "09:30", "10:30")
+        adjacent = self.add_slot(1, "10:00", "11:00")
+        other_day = self.add_slot(2, "09:30", "10:30")
+
+        self.assertEqual(overlap.status_code, 409)
+        self.assertEqual(adjacent.status_code, 201)
+        self.assertEqual(other_day.status_code, 201)
+        self.assertEqual(Timetable.objects.count(), 3)
+
+    def test_fr009_other_sections_can_use_same_period(self):
+        self.add_slot(1, "09:00", "10:00")
+        other = self.make_section(self.section.course, code="B")
+
+        response = self.add_slot(
+            1, "09:00", "10:00", reverse("academic-section-timetable", args=[other.pk])
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_fr009_admin_removes_period(self):
+        slot = Timetable.objects.create(
+            section=self.section, day_of_week=1, start_time=time(9), end_time=time(10)
+        )
+
+        response = self.as_user(self.admin).delete(
+            reverse("academic-timetable-slot", args=[slot.pk])
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Timetable.objects.exists())
+
+    def test_fr009_non_admin_cannot_change_timetable(self):
+        slot = Timetable.objects.create(
+            section=self.section, day_of_week=1, start_time=time(9), end_time=time(10)
+        )
+        with self.assertLogs("users.permissions", level="WARNING"):
+            create = self.as_user(self.faculty).post(
+                self.url, {"day_of_week": 2, "start_time": "09:00", "end_time": "10:00"}
+            )
+            delete = self.client.delete(reverse("academic-timetable-slot", args=[slot.pk]))
+
+        self.assertEqual(create.status_code, 403)
+        self.assertEqual(delete.status_code, 403)
+        self.assertEqual(Timetable.objects.count(), 1)
+
+    def test_fr009_service_detects_overlap(self):
+        services.add_timetable_slot(
+            section=self.section, day_of_week=3, start_time=time(11), end_time=time(12)
+        )
+
+        with self.assertRaises(services.AcademicConflict):
+            services.add_timetable_slot(
+                section=self.section,
+                day_of_week=3,
+                start_time=time(10, 30),
+                end_time=time(11, 30),
+            )

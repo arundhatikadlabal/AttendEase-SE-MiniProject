@@ -9,13 +9,16 @@ from analytics.models import Course, Enrollment, Section
 from users.models import User
 
 from . import services
+from .models import Timetable
 from .serializers import (
     CourseSerializer,
     EnrollmentSerializer,
     SectionSerializer,
+    TimetableSlotSerializer,
     course_data,
     person_data,
     section_data,
+    timetable_slot_data,
 )
 
 ANY_ROLE = (User.Role.STUDENT, User.Role.FACULTY, User.Role.ADMIN)
@@ -27,7 +30,11 @@ def conflict_response(error):
 
 
 def sections_queryset():
-    return Section.objects.select_related("course", "faculty").order_by("code")
+    return (
+        Section.objects.select_related("course", "faculty")
+        .prefetch_related("timetable_slots")
+        .order_by("code")
+    )
 
 
 def courses_queryset():
@@ -161,4 +168,36 @@ class SectionEnrollmentDetailView(APIView):
                 {"detail": "This student is not enrolled in this section."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SectionTimetableView(APIView):
+    """FR-009: view a section's weekly timetable; admins add periods."""
+
+    roles_by_method = {"GET": ANY_ROLE, "POST": ADMIN_ONLY}
+
+    def get(self, request, section_id):
+        section = get_object_or_404(Section, pk=section_id)
+        return Response(
+            [timetable_slot_data(slot) for slot in section.timetable_slots.all()]
+        )
+
+    def post(self, request, section_id):
+        section = get_object_or_404(Section, pk=section_id)
+        serializer = TimetableSlotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            slot = services.add_timetable_slot(section=section, **serializer.validated_data)
+        except services.AcademicConflict as error:
+            return conflict_response(error)
+        return Response(timetable_slot_data(slot), status=status.HTTP_201_CREATED)
+
+
+class TimetableSlotDetailView(APIView):
+    """FR-009: admins remove a timetable period."""
+
+    allowed_roles = ADMIN_ONLY
+
+    def delete(self, request, slot_id):
+        get_object_or_404(Timetable, pk=slot_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
