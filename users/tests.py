@@ -36,3 +36,25 @@ class RegistrationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(get_user_model().objects.filter(email="admin@example.com").exists())
+
+    def test_fr002_rejects_duplicate_email_ignoring_case(self):
+        get_user_model().objects.create_user(
+            email="student@example.com",
+            name="Existing Student",
+            role="student",
+            password="StrongPass123!",
+        )
+
+        response = self.client.post(
+            reverse("register"),
+            {
+                "name": "Another Student",
+                "email": "Student@Example.COM",
+                "password": "AnotherPass123!",
+                "role": "student",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.json())
+        self.assertEqual(get_user_model().objects.count(), 1)
