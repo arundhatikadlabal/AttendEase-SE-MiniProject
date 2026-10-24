@@ -2,7 +2,7 @@
 
 from django.db import IntegrityError, transaction
 
-from analytics.models import Course
+from analytics.models import Course, Section
 
 
 class AcademicConflict(Exception):
@@ -48,3 +48,15 @@ def update_course(course, *, code=None, title=None):
     except IntegrityError as error:
         raise AcademicConflict("code", DUPLICATE_COURSE_MESSAGE) from error
     return course
+
+
+def create_section(*, course, code):
+    """FR-007: create a section within a course; faculty is assigned separately."""
+    return Section.objects.create(course=course, code=normalize_code(code))
+
+
+def update_section(section, *, code):
+    """FR-007: rename a section."""
+    section.code = normalize_code(code)
+    section.save(update_fields=["code"])
+    return section
