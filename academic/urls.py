@@ -1,9 +1,11 @@
 from django.urls import path
 
 from .views import (
+    AssignmentView,
     CourseDetailView,
     CourseListView,
     CourseSectionListView,
+    MySectionsView,
     SectionDetailView,
     SectionEnrollmentDetailView,
     SectionEnrollmentListView,
@@ -40,4 +42,6 @@ urlpatterns = [
         TimetableSlotDetailView.as_view(),
         name="academic-timetable-slot",
     ),
+    path("assignments", AssignmentView.as_view(), name="academic-assignments"),
+    path("my-sections", MySectionsView.as_view(), name="academic-my-sections"),
 ]

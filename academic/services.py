@@ -143,3 +143,23 @@ def add_timetable_slot(*, section, day_of_week, start_time, end_time):
             )
     except IntegrityError as error:
         raise AcademicConflict("start_time", OVERLAP_MESSAGE) from error
+
+
+def assign_faculty(*, section, faculty):
+    """FR-013: make a faculty member responsible for a section."""
+    _require_role(faculty, User.Role.FACULTY, "faculty member")
+    section.faculty = faculty
+    section.save(update_fields=["faculty"])
+    return section
+
+
+def sections_for_user(user):
+    """Sections a faculty member teaches, or a student is enrolled in."""
+    queryset = Section.objects.select_related("course", "faculty").prefetch_related(
+        "timetable_slots"
+    )
+    if user.role == User.Role.FACULTY:
+        return queryset.filter(faculty=user).order_by("course__code", "code")
+    if user.role == User.Role.STUDENT:
+        return queryset.filter(enrollments__student=user).order_by("course__code", "code")
+    return queryset.none()
