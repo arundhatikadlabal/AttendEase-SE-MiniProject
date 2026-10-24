@@ -2,7 +2,8 @@
 
 from django.db import IntegrityError, transaction
 
-from analytics.models import Course, Section
+from analytics.models import Course, Enrollment, Section
+from users.models import User
 
 
 class AcademicConflict(Exception):
@@ -16,6 +17,11 @@ class AcademicConflict(Exception):
 
 def normalize_code(code):
     return code.strip().upper()
+
+
+def _require_role(user, role, label):
+    if user.role != role or not user.is_active:
+        raise ValueError(f"User {user.pk} is not an active {label}")
 
 
 DUPLICATE_COURSE_MESSAGE = "A course with this code already exists."
@@ -87,3 +93,24 @@ def update_section(section, *, code):
     except IntegrityError as error:
         raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE) from error
     return section
+
+
+DUPLICATE_ENROLLMENT_MESSAGE = "This student is already enrolled in this section."
+
+
+def enroll_student(*, section, student):
+    """FR-008: enroll a student into a section exactly once."""
+    _require_role(student, User.Role.STUDENT, "student")
+    if Enrollment.objects.filter(section=section, student=student).exists():
+        raise AcademicConflict("student_id", DUPLICATE_ENROLLMENT_MESSAGE)
+    try:
+        with transaction.atomic():
+            return Enrollment.objects.create(section=section, student=student)
+    except IntegrityError as error:
+        raise AcademicConflict("student_id", DUPLICATE_ENROLLMENT_MESSAGE) from error
+
+
+def unenroll_student(*, section, student):
+    """FR-008: remove a student from a section. Returns False if not enrolled."""
+    deleted, _ = Enrollment.objects.filter(section=section, student=student).delete()
+    return deleted > 0
