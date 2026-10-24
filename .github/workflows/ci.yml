@@ -26,7 +26,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint with Ruff
-        run: ruff check analytics config manage.py
+        run: ruff check analytics config users manage.py
 
       - name: Run Django system checks
         run: python manage.py check
