@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from users.models import User
 
+from .models import Timetable
+
 
 def _active_users(role, label):
     return serializers.PrimaryKeyRelatedField(
@@ -23,10 +25,33 @@ class EnrollmentSerializer(serializers.Serializer):
     student_id = _active_users(User.Role.STUDENT, "student")
 
 
+class TimetableSlotSerializer(serializers.Serializer):
+    day_of_week = serializers.ChoiceField(choices=Timetable.Weekday.choices)
+    start_time = serializers.TimeField()
+    end_time = serializers.TimeField()
+
+    def validate(self, attrs):
+        if attrs["end_time"] <= attrs["start_time"]:
+            raise serializers.ValidationError(
+                {"end_time": "End time must be after start time."}
+            )
+        return attrs
+
+
 def person_data(user):
     if user is None:
         return None
     return {"id": user.pk, "name": user.name, "email": user.email}
+
+
+def timetable_slot_data(slot):
+    return {
+        "id": slot.pk,
+        "day_of_week": slot.day_of_week,
+        "day_name": slot.get_day_of_week_display(),
+        "start_time": slot.start_time.strftime("%H:%M"),
+        "end_time": slot.end_time.strftime("%H:%M"),
+    }
 
 
 def section_data(section, include_course=False):
@@ -34,6 +59,7 @@ def section_data(section, include_course=False):
         "id": section.pk,
         "code": section.code,
         "faculty": person_data(section.faculty),
+        "timetable": [timetable_slot_data(slot) for slot in section.timetable_slots.all()],
     }
     if include_course:
         course = section.course
