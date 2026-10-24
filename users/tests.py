@@ -1,6 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from rest_framework.response import Response
+from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.views import APIView
 
 from .models import LoginAttempt
 from .security import login_failure_key
@@ -104,3 +107,52 @@ class LoginTests(TestCase):
             {"email": self.email, "password": "StrongPass123!"},
         )
         self.assertEqual(recovered.status_code, 200)
+
+
+class AdminOnlyAcademicView(APIView):
+    allowed_roles = ("admin",)
+
+    def post(self, request):
+        return Response({"saved": True})
+
+
+class RoleAccessTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.student = User.objects.create_user(
+            email="student@example.com", name="Student", role="student", password="Pass123!"
+        )
+        self.admin = User.objects.create_superuser(
+            email="admin@example.com", name="Admin", password="Pass123!"
+        )
+
+    def test_tc09_student_cannot_call_admin_only_endpoint(self):
+        request = APIRequestFactory().post("/api/academic/courses", {})
+        force_authenticate(request, user=self.student)
+
+        with self.assertLogs("users.permissions", level="WARNING"):
+            response = AdminOnlyAcademicView.as_view()(request)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_call_admin_only_endpoint(self):
+        request = APIRequestFactory().post("/api/academic/courses", {})
+        force_authenticate(request, user=self.admin)
+
+        response = AdminOnlyAcademicView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_protected_me_endpoint_requires_jwt(self):
+        anonymous = self.client.get(reverse("me"))
+        self.assertEqual(anonymous.status_code, 401)
+
+        login = self.client.post(
+            reverse("login"),
+            {"email": "student@example.com", "password": "Pass123!"},
+        )
+        token = login.json()["access"]
+        authorized = self.client.get(reverse("me"), HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        self.assertEqual(authorized.status_code, 200)
+        self.assertEqual(authorized.json()["role"], "student")

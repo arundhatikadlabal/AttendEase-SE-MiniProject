@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .models import User
 from .security import clear_failed_logins, is_login_locked, record_failed_login
 from .serializers import RegistrationSerializer
 
@@ -57,3 +58,11 @@ class LoginView(APIView):
         clear_failed_logins(email)
         refresh = RefreshToken.for_user(user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
+
+
+class MeView(APIView):
+    allowed_roles = (User.Role.STUDENT, User.Role.FACULTY, User.Role.ADMIN)
+
+    def get(self, request):
+        user = request.user
+        return Response({"id": user.pk, "name": user.name, "email": user.email, "role": user.role})
