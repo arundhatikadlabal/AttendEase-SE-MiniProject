@@ -48,3 +48,9 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+
+class LoginAttempt(models.Model):
+    key = models.CharField(max_length=64, primary_key=True)
+    failures = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField()
