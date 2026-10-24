@@ -26,3 +26,9 @@ htmlcov/
 # Editors and operating system
 .vscode/
 .DS_Store
+
+# Docker and local development
+.env.local
+
+# Coverage reports
+coverage.xml

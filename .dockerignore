@@ -1,0 +1,15 @@
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.coverage
+.ruff_cache/
+.git/
+.github/
+.env
+.env.*
+!.env.example
+AttendEase_Deliverables/
+AttendEase_Combined_SRS_SAD_TestPlan.pdf
