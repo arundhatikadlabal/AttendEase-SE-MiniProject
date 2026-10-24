@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from analytics.models import Course
+from analytics.models import Course, Section
 
 PASSWORD = "StrongPass123!"
 
@@ -39,6 +39,9 @@ class AcademicTestCase(TestCase):
 
     def make_course(self, code="CS101", title="Intro to Programming"):
         return Course.objects.create(code=code, title=title)
+
+    def make_section(self, course, code="A", faculty=None):
+        return Section.objects.create(course=course, code=code, faculty=faculty)
 
 
 class CourseTests(AcademicTestCase):
@@ -139,3 +142,89 @@ class CourseTests(AcademicTestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Course.objects.exists())
+
+
+class SectionTests(AcademicTestCase):
+    """FR-007: administrators create and edit sections within a course."""
+
+    def setUp(self):
+        super().setUp()
+        self.course = self.make_course()
+
+    def test_fr007_admin_creates_section_without_faculty(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-course-sections", args=[self.course.pk]), {"code": "a"}
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["code"], "A")
+        self.assertEqual(body["course"]["code"], "CS101")
+        self.assertIsNone(body["faculty"])
+        section = Section.objects.get(course=self.course, code="A")
+        self.assertIsNone(section.faculty)
+
+    def test_fr007_admin_edits_section_code(self):
+        section = self.make_section(self.course, code="A")
+
+        response = self.as_user(self.admin).patch(
+            reverse("academic-section", args=[section.pk]), {"code": "c"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        section.refresh_from_db()
+        self.assertEqual(section.code, "C")
+
+    def test_fr007_section_code_is_required(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-course-sections", args=[self.course.pk]), {"code": " "}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Section.objects.exists())
+
+    def test_fr007_unknown_course_or_section_returns_404(self):
+        create = self.as_user(self.admin).post(
+            reverse("academic-course-sections", args=[9999]), {"code": "A"}
+        )
+        detail = self.client.get(reverse("academic-section", args=[9999]))
+
+        self.assertEqual(create.status_code, 404)
+        self.assertEqual(detail.status_code, 404)
+
+    def test_fr007_lists_sections_for_course(self):
+        self.make_section(self.course, code="B")
+        self.make_section(self.course, code="A", faculty=self.faculty)
+        self.make_section(self.make_course(code="CS102"), code="Z")
+
+        response = self.as_user(self.student).get(
+            reverse("academic-course-sections", args=[self.course.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([s["code"] for s in response.json()], ["A", "B"])
+        self.assertEqual(response.json()[0]["faculty"]["name"], "Faculty One")
+
+    def test_fr007_course_list_includes_sections(self):
+        self.make_section(self.course, code="B")
+        self.make_section(self.course, code="A")
+
+        response = self.as_user(self.faculty).get(reverse("academic-courses"))
+
+        [listed] = response.json()
+        self.assertEqual([s["code"] for s in listed["sections"]], ["A", "B"])
+
+    def test_fr007_non_admins_cannot_create_or_edit_sections(self):
+        section = self.make_section(self.course, code="A")
+        with self.assertLogs("users.permissions", level="WARNING"):
+            create = self.as_user(self.faculty).post(
+                reverse("academic-course-sections", args=[self.course.pk]), {"code": "B"}
+            )
+            edit = self.as_user(self.student).patch(
+                reverse("academic-section", args=[section.pk]), {"code": "Z"}, format="json"
+            )
+
+        self.assertEqual(create.status_code, 403)
+        self.assertEqual(edit.status_code, 403)
+        section.refresh_from_db()
+        self.assertEqual(section.code, "A")
