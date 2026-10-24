@@ -50,13 +50,40 @@ def update_course(course, *, code=None, title=None):
     return course
 
 
+DUPLICATE_SECTION_MESSAGE = "This course already has a section with this code."
+
+
+def _section_code_taken(course, code, exclude_pk=None):
+    queryset = Section.objects.filter(course=course, code=code)
+    if exclude_pk is not None:
+        queryset = queryset.exclude(pk=exclude_pk)
+    return queryset.exists()
+
+
 def create_section(*, course, code):
-    """FR-007: create a section within a course; faculty is assigned separately."""
-    return Section.objects.create(course=course, code=normalize_code(code))
+    """FR-007 / FR-011: create a section whose code is unique within its course.
+
+    Faculty is assigned separately (FR-013).
+    """
+    code = normalize_code(code)
+    if _section_code_taken(course, code):
+        raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE)
+    try:
+        with transaction.atomic():
+            return Section.objects.create(course=course, code=code)
+    except IntegrityError as error:
+        raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE) from error
 
 
 def update_section(section, *, code):
-    """FR-007: rename a section."""
-    section.code = normalize_code(code)
-    section.save(update_fields=["code"])
+    """FR-007 / FR-011: rename a section without colliding with a sibling."""
+    code = normalize_code(code)
+    if _section_code_taken(section.course, code, exclude_pk=section.pk):
+        raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE)
+    section.code = code
+    try:
+        with transaction.atomic():
+            section.save(update_fields=["code"])
+    except IntegrityError as error:
+        raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE) from error
     return section

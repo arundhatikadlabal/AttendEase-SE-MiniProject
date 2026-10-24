@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -228,3 +229,52 @@ class SectionTests(AcademicTestCase):
         self.assertEqual(edit.status_code, 403)
         section.refresh_from_db()
         self.assertEqual(section.code, "A")
+
+
+class DuplicateSectionCodeTests(AcademicTestCase):
+    """FR-011: section codes are unique within a course."""
+
+    def setUp(self):
+        super().setUp()
+        self.course = self.make_course()
+        self.section_a = self.make_section(self.course, code="A")
+
+    def test_fr011_duplicate_section_code_in_same_course_is_rejected(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-course-sections", args=[self.course.pk]), {"code": " a "}
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("code", response.json())
+        self.assertEqual(Section.objects.filter(course=self.course).count(), 1)
+
+    def test_fr011_same_section_code_allowed_in_different_course(self):
+        other_course = self.make_course(code="CS102")
+
+        response = self.as_user(self.admin).post(
+            reverse("academic-course-sections", args=[other_course.pk]), {"code": "A"}
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_fr011_renaming_to_sibling_code_is_rejected(self):
+        section_b = self.make_section(self.course, code="B")
+
+        response = self.as_user(self.admin).patch(
+            reverse("academic-section", args=[section_b.pk]), {"code": "a"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 409)
+        section_b.refresh_from_db()
+        self.assertEqual(section_b.code, "B")
+
+    def test_fr011_renaming_section_to_its_own_code_is_allowed(self):
+        response = self.as_user(self.admin).patch(
+            reverse("academic-section", args=[self.section_a.pk]), {"code": "a"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_fr011_database_enforces_unique_section_code(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Section.objects.create(course=self.course, code="A")
