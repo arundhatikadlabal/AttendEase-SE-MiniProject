@@ -36,6 +36,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=150)
     role = models.CharField(max_length=10, choices=Role.choices)
+    token_version = models.PositiveIntegerField(default=0)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["name"]
