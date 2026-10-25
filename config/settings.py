@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "analytics",
     "users",
     "academic",
+    "corrections",
 ]
 
 AUTH_USER_MODEL = "users.User"
