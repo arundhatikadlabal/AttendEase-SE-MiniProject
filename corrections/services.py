@@ -1,5 +1,7 @@
 """Student correction submission (FR-024); decisions are separate stories."""
 
+from functools import partial
+
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
@@ -8,6 +10,7 @@ from analytics.models import AttendanceRecord, Enrollment
 from users.models import User
 
 from .models import CorrectionRequest
+from .notifications import notify_faculty
 
 
 class PendingCorrectionConflict(APIException):
@@ -49,7 +52,7 @@ def submit_correction(*, student, record_id, reason):
 
         try:
             with transaction.atomic():
-                return CorrectionRequest.objects.create(
+                correction = CorrectionRequest.objects.create(
                     record=record,
                     student=student,
                     reason=reason,
@@ -60,3 +63,8 @@ def submit_correction(*, student, record_id, reason):
             if pending.exists():
                 raise PendingCorrectionConflict() from error
             raise
+
+        # A rolled-back request must never send an email. Unexpected callback
+        # failures are also non-fatal to the already committed correction.
+        transaction.on_commit(partial(notify_faculty, correction.pk), robust=True)
+        return correction
