@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "analytics",
     "users",
     "academic",
+    "corrections",
     "attendance",
 ]
 

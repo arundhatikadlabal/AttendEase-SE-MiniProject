@@ -26,7 +26,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint with Ruff
-        run: ruff check academic analytics attendance config users manage.py
+        run: ruff check academic analytics attendance config corrections users manage.py
 
       - name: Run Django system checks
         run: python manage.py check
