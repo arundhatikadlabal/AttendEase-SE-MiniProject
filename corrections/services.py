@@ -63,8 +63,25 @@ def submit_correction(*, student, record_id, reason):
             if pending.exists():
                 raise PendingCorrectionConflict() from error
             raise
-
+            
         # A rolled-back request must never send an email. Unexpected callback
         # failures are also non-fatal to the already committed correction.
         transaction.on_commit(partial(notify_faculty, correction.pk), robust=True)
         return correction
+
+
+def pending_corrections_for_faculty(faculty):
+    """FR-026: pending requests in the faculty member's currently assigned sections."""
+    if not faculty.is_active or faculty.role != User.Role.FACULTY:
+        raise PermissionDenied(
+            "Only active faculty may view the pending correction queue."
+        )
+    return (
+        CorrectionRequest.objects.filter(
+            status=CorrectionRequest.Status.PENDING,
+            record__session__section__faculty=faculty,
+        )
+        .select_related("student", "record__session__section__course")
+        .order_by("created_at", "pk")
+    )
+
