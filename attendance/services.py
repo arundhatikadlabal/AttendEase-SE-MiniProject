@@ -262,7 +262,7 @@ class SessionAlreadyClosed(APIException):
 
 
 def close_session(*, faculty, session_id):
-    """FR-018: finalize a session; no further marking is possible afterwards.
+    """FR-018 / FR-019: finalize a session and record when it was closed.
 
     Students left unmarked are not attending, so they count as absent in the
     attendance percentage (FR-029), which only counts present records.
@@ -276,5 +276,6 @@ def close_session(*, faculty, session_id):
         if session.closed:
             raise SessionAlreadyClosed()
         session.closed = True
-        session.save(update_fields=["closed"])
+        session.closed_at = timezone.now()
+        session.save(update_fields=["closed", "closed_at"])
         return session
