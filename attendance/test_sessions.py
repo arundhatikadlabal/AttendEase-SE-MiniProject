@@ -14,6 +14,7 @@ from analytics.models import (
     Enrollment,
     Section,
 )
+from analytics.services import calculate_attendance_percentage
 from users.models import User
 
 from . import services
@@ -445,3 +446,75 @@ class MarkAllPresentTests(SessionTestCase):
         session.save()
         self.assertEqual(self.mark_all(session).status_code, 400)
         self.assertFalse(session.records.exists())
+
+
+class CloseSessionTests(SessionTestCase):
+    """FR-018: faculty close/finalize a session after marking."""
+
+    def close(self, session, user=None):
+        return self.as_user(user or self.faculty).post(
+            reverse("attendance-session-close", args=[session.pk])
+        )
+
+    def test_fr018_faculty_closes_session(self):
+        session = self.open_session()
+        self.as_user(self.faculty).post(
+            reverse("attendance-mark-all-present", args=[session.pk])
+        )
+
+        response = self.close(session)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["session"]["closed"])
+        session.refresh_from_db()
+        self.assertTrue(session.closed)
+
+    def test_fr018_closed_session_rejects_further_marking(self):
+        session = self.open_session()
+        self.close(session)
+
+        toggle = self.client.put(
+            reverse("attendance-student-mark", args=[session.pk, self.students[0].pk]),
+            {"status": "present"},
+            format="json",
+        )
+        bulk = self.client.post(reverse("attendance-mark-all-present", args=[session.pk]))
+        batch = self.client.post(
+            reverse("attendance-records", args=[session.pk]),
+            {"records": [{"student_id": self.students[0].pk, "status": "present"}]},
+            format="json",
+        )
+
+        self.assertEqual((toggle.status_code, bulk.status_code, batch.status_code), (400, 400, 400))
+        self.assertFalse(session.records.exists())
+
+    def test_fr018_closing_twice_returns_409(self):
+        session = self.open_session()
+        self.close(session)
+
+        self.assertEqual(self.close(session).status_code, 409)
+
+    def test_fr018_only_assigned_faculty_can_close(self):
+        session = self.open_session()
+
+        self.assertEqual(self.close(session, self.other_faculty).status_code, 403)
+        with self.assertLogs("users.permissions", level="WARNING"):
+            self.assertEqual(self.close(session, self.admin).status_code, 403)
+        session.refresh_from_db()
+        self.assertFalse(session.closed)
+
+    def test_fr018_closed_session_counts_towards_attendance_percentage(self):
+        session = self.open_session()
+        self.client.force_authenticate(self.faculty)
+        self.client.put(
+            reverse("attendance-student-mark", args=[session.pk, self.students[0].pk]),
+            {"status": "present"},
+            format="json",
+        )
+        before = calculate_attendance_percentage(self.students[0], self.course)
+
+        self.close(session)
+
+        self.assertEqual(before, 0)
+        self.assertEqual(calculate_attendance_percentage(self.students[0], self.course), 100)
+        self.assertEqual(calculate_attendance_percentage(self.students[1], self.course), 0)

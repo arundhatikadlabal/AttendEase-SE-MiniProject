@@ -253,3 +253,28 @@ def mark_all_present(*, faculty, session_id):
             ]
         )
         return session
+
+
+class SessionAlreadyClosed(APIException):
+    status_code = 409
+    default_detail = "This attendance session is already closed."
+    default_code = "session_closed"
+
+
+def close_session(*, faculty, session_id):
+    """FR-018: finalize a session; no further marking is possible afterwards.
+
+    Students left unmarked are not attending, so they count as absent in the
+    attendance percentage (FR-029), which only counts present records.
+    """
+    with transaction.atomic():
+        session = get_object_or_404(
+            AttendanceSession.objects.select_for_update().select_related("section"),
+            pk=session_id,
+        )
+        _require_assigned_faculty(faculty, session.section)
+        if session.closed:
+            raise SessionAlreadyClosed()
+        session.closed = True
+        session.save(update_fields=["closed"])
+        return session
