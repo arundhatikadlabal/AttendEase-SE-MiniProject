@@ -98,3 +98,14 @@ class StudentMarkView(APIView):
             status=serializer.validated_data["status"],
         )
         return Response(record_data(record))
+
+
+class MarkAllPresentView(APIView):
+    """FR-017: faculty mark every enrolled student present with one action."""
+
+    allowed_roles = (User.Role.FACULTY,)
+
+    def post(self, request, session_id):
+        services.mark_all_present(faculty=request.user, session_id=session_id)
+        session = services.get_session_for_user(request.user, session_id)
+        return Response(roster_data(session, services.session_roster(session)))

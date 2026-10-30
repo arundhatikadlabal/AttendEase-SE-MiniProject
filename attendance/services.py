@@ -218,3 +218,38 @@ def mark_student(*, faculty, session_id, student_id, status):
             defaults={"status": status.upper()},
         )
         return record
+
+
+def mark_all_present(*, faculty, session_id):
+    """FR-017: mark every enrolled active student present in one action."""
+    with transaction.atomic():
+        session = _locked_session_for_marking(faculty, session_id)
+        student_ids = list(
+            Enrollment.objects.filter(
+                section_id=session.section_id,
+                student__role=User.Role.STUDENT,
+                student__is_active=True,
+            ).values_list("student_id", flat=True)
+        )
+        AttendanceRecord.objects.filter(
+            session=session, student_id__in=student_ids
+        ).exclude(status=AttendanceRecord.Status.PRESENT).update(
+            status=AttendanceRecord.Status.PRESENT
+        )
+        already = set(
+            AttendanceRecord.objects.filter(
+                session=session, student_id__in=student_ids
+            ).values_list("student_id", flat=True)
+        )
+        AttendanceRecord.objects.bulk_create(
+            [
+                AttendanceRecord(
+                    session=session,
+                    student_id=student_id,
+                    status=AttendanceRecord.Status.PRESENT,
+                )
+                for student_id in student_ids
+                if student_id not in already
+            ]
+        )
+        return session

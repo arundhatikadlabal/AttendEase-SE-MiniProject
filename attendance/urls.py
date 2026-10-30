@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AttendanceRecordsView,
+    MarkAllPresentView,
     SessionDetailView,
     SessionListView,
     SessionRosterView,
@@ -31,5 +32,10 @@ urlpatterns = [
         "sessions/<int:session_id>/records/<int:student_id>",
         StudentMarkView.as_view(),
         name="attendance-student-mark",
+    ),
+    path(
+        "sessions/<int:session_id>/mark-all-present",
+        MarkAllPresentView.as_view(),
+        name="attendance-mark-all-present",
     ),
 ]
