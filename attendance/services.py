@@ -1,6 +1,7 @@
 """Attendance sessions and records over the shared analytics models (FR-014 to FR-019, FR-037)."""
 
 from django.db import IntegrityError, transaction
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import (
@@ -161,3 +162,23 @@ def start_session(*, faculty, timetable_slot, date):
             )
     except IntegrityError as error:
         raise SessionConflict() from error
+
+
+def session_roster(session):
+    """FR-015: enrolled active students with their status in this session.
+
+    One query: the status comes from a subquery, so the cost does not grow
+    with the number of students (NFR-002).
+    """
+    status = AttendanceRecord.objects.filter(
+        session=session, student=OuterRef("pk")
+    ).values("status")[:1]
+    return (
+        User.objects.filter(
+            attendance_enrollments__section_id=session.section_id,
+            role=User.Role.STUDENT,
+            is_active=True,
+        )
+        .annotate(attendance_status=Subquery(status))
+        .order_by("name", "email")
+    )
