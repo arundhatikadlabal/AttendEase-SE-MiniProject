@@ -9,6 +9,10 @@ class AttendanceEntrySerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=("present", "absent"))
 
 
+class StudentMarkSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=("present", "absent"))
+
+
 class AttendanceSubmissionSerializer(serializers.Serializer):
     records = AttendanceEntrySerializer(many=True, allow_empty=False)
 

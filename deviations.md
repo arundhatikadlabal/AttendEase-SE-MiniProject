@@ -86,3 +86,13 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Why it matters:** From 00:00 to 05:30 IST the UTC date is still the previous day, so a session dated "today" in India would count as future during those hours. Classes don't run then, so this doesn't affect normal use. Setting `TIME_ZONE = "Asia/Kolkata"` would remove the gap, but that is a project-wide setting, so it is left for a team decision.
 
 **Introduced in:** `feature/nfr-004-no-future-dates`.
+
+### D-08: Per-student marks can be changed while a session is open (FR-016)
+
+**Documents:** FR-016 says faculty mark each student present or absent. SAD §5 describes the marking screen as a roster with a per-student toggle. FR-037 (Role 3) prevents duplicate records.
+
+**Implementation:** `PUT /api/attendance/sessions/{id}/records/{student_id}` with `{"status": "present"|"absent"}` creates the student's record, or changes it if it already exists, while the session is open. It still never creates a second record for the same student and session, so FR-037 holds. Once the session is closed (FR-018), marks can only change through Role 3's edit-window and correction flows (FR-038, FR-027). The FR-037 batch endpoint `POST .../records` is unchanged: it still refuses to overwrite existing records.
+
+**Why:** A toggle that couldn't be undone would make a mis-click permanent before the session is even closed.
+
+**Introduced in:** `feature/fr-016-mark-student`.
