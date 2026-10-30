@@ -11,7 +11,9 @@ from rest_framework.exceptions import (
     ValidationError,
 )
 
+from academic.services import sections_for_user
 from analytics.models import AttendanceRecord, AttendanceSession, Enrollment
+from analytics.services import calculate_attendance_percentage
 from users.models import User
 
 
@@ -19,6 +21,23 @@ class DuplicateAttendance(APIException):
     status_code = 409
     default_detail = "Attendance already exists for this student and session."
     default_code = "duplicate_attendance"
+
+
+def student_dashboard_courses(student):
+    """FR-020: one attendance percentage per enrolled active course."""
+    courses = {
+        section.course_id: section.course
+        for section in sections_for_user(student)
+    }
+    return [
+        {
+            "course_id": course.pk,
+            "course_code": course.code,
+            "course_title": course.title,
+            "attendance_percentage": calculate_attendance_percentage(student, course),
+        }
+        for course in sorted(courses.values(), key=lambda item: item.code)
+    ]
 
 
 def submit_records(*, faculty, session_id, records):
