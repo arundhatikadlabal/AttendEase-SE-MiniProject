@@ -28,7 +28,7 @@ def record_data(record):
 
 class StartSessionSerializer(serializers.Serializer):
     timetable_slot_id = serializers.PrimaryKeyRelatedField(
-        queryset=Timetable.objects.select_related("section"),
+        queryset=Timetable.objects.select_related("section__course"),
         error_messages={"does_not_exist": "No timetable period exists with this id."},
     )
     date = serializers.DateField(required=False)
