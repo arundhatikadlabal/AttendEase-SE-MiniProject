@@ -76,3 +76,13 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Why:** Without a link to the period, "scheduled section period" can't be checked, and one class could be recorded twice on the same day. The link is nullable, so sessions created before this change, and the existing tests that create them directly, still work.
 
 **Introduced in:** `feature/fr-014-start-session`.
+
+### D-07: "Today" for future-date checks uses the server time zone, UTC (NFR-004)
+
+**Documents:** NFR-004 says the system shall prevent attendance being recorded for future dates. It doesn't say whose "today" applies.
+
+**Implementation:** Starting a session with a date after today returns 400, and so does submitting records for a session dated after today. A missing `date` defaults to today. "Today" comes from Django's `timezone.localdate()`, so it follows `TIME_ZONE` in `config/settings.py`, which is currently `UTC`.
+
+**Why it matters:** From 00:00 to 05:30 IST the UTC date is still the previous day, so a session dated "today" in India would count as future during those hours. Classes don't run then, so this doesn't affect normal use. Setting `TIME_ZONE = "Asia/Kolkata"` would remove the gap, but that is a project-wide setting, so it is left for a team decision.
+
+**Introduced in:** `feature/nfr-004-no-future-dates`.

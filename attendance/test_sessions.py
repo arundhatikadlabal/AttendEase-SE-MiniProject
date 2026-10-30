@@ -1,12 +1,16 @@
-from datetime import date, time
+from datetime import date, time, timedelta
+from unittest import mock
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from academic.models import Timetable
 from analytics.models import AttendanceSession, Course, Enrollment, Section
 from users.models import User
+
+from . import services
 
 PASSWORD = "StrongPass123!"
 MONDAY = date(2026, 10, 26)
@@ -104,9 +108,9 @@ class StartSessionTests(SessionTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(AttendanceSession.objects.count(), 1)
 
-    def test_fr014_same_period_next_week_is_allowed(self):
+    def test_fr014_same_period_on_another_week_is_allowed(self):
         self.assertEqual(self.start().status_code, 201)
-        self.assertEqual(self.start(on=date(2026, 11, 2)).status_code, 201)
+        self.assertEqual(self.start(on=date(2026, 10, 19)).status_code, 201)
 
     def test_fr014_only_the_assigned_faculty_can_start(self):
         response = self.start(user=self.other_faculty)
@@ -153,3 +157,55 @@ class StartSessionTests(SessionTestCase):
         self.assertEqual(other.json(), [])
         self.assertEqual(hidden.status_code, 403)
         self.assertEqual(missing.status_code, 404)
+
+
+class FutureDateTests(SessionTestCase):
+    """NFR-004: attendance cannot be recorded for future dates."""
+
+    def test_nfr004_future_session_date_is_rejected(self):
+        next_monday = MONDAY + timedelta(days=7)
+        with mock.patch.object(timezone, "localdate", return_value=MONDAY):
+            response = self.start(on=next_monday)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("future", str(response.json()["date"]))
+        self.assertFalse(AttendanceSession.objects.exists())
+
+    def test_nfr004_today_and_past_dates_are_allowed(self):
+        with mock.patch.object(timezone, "localdate", return_value=MONDAY):
+            today = self.start(on=MONDAY)
+            past = self.start(on=MONDAY - timedelta(days=7))
+
+        self.assertEqual(today.status_code, 201)
+        self.assertEqual(past.status_code, 201)
+
+    def test_nfr004_missing_date_defaults_to_today(self):
+        with mock.patch.object(timezone, "localdate", return_value=MONDAY):
+            response = self.start(on=None)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["date"], MONDAY.isoformat())
+
+    def test_nfr004_records_cannot_be_submitted_for_a_future_session(self):
+        session = self.open_session(on=MONDAY + timedelta(days=7))
+
+        with mock.patch.object(timezone, "localdate", return_value=MONDAY):
+            response = self.as_user(self.faculty).post(
+                reverse("attendance-records", args=[session.pk]),
+                {"records": [{"student_id": self.students[0].pk, "status": "present"}]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("session", response.json())
+        self.assertFalse(session.records.exists())
+
+    def test_nfr004_service_rejects_future_date(self):
+        with mock.patch.object(timezone, "localdate", return_value=MONDAY), self.assertRaises(
+            services.ValidationError
+        ):
+            services.start_session(
+                faculty=self.faculty,
+                timetable_slot=self.monday_slot,
+                date=MONDAY + timedelta(days=7),
+            )

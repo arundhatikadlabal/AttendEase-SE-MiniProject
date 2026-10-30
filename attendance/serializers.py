@@ -29,6 +29,13 @@ class StartSessionSerializer(serializers.Serializer):
     )
     date = serializers.DateField(required=False)
 
+    def validate_date(self, value):
+        if value > timezone.localdate():
+            raise serializers.ValidationError(
+                "Attendance cannot be recorded for a future date."
+            )
+        return value
+
     def validate(self, attrs):
         attrs.setdefault("date", timezone.localdate())
         return attrs
