@@ -4,6 +4,7 @@ from .views import (
     AttendanceRecordsView,
     SessionDetailView,
     SessionListView,
+    SessionRosterView,
     SessionStartView,
 )
 
@@ -14,6 +15,11 @@ urlpatterns = [
         "sessions/<int:session_id>",
         SessionDetailView.as_view(),
         name="attendance-session",
+    ),
+    path(
+        "sessions/<int:session_id>/roster",
+        SessionRosterView.as_view(),
+        name="attendance-session-roster",
     ),
     path(
         "sessions/<int:session_id>/records",

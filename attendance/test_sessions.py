@@ -7,7 +7,13 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from academic.models import Timetable
-from analytics.models import AttendanceSession, Course, Enrollment, Section
+from analytics.models import (
+    AttendanceRecord,
+    AttendanceSession,
+    Course,
+    Enrollment,
+    Section,
+)
 from users.models import User
 
 from . import services
@@ -209,3 +215,78 @@ class FutureDateTests(SessionTestCase):
                 timetable_slot=self.monday_slot,
                 date=MONDAY + timedelta(days=7),
             )
+
+
+class RosterTests(SessionTestCase):
+    """FR-015: the enrolled-student roster for the active session."""
+
+    def roster(self, session, user=None):
+        return self.as_user(user or self.faculty).get(
+            reverse("attendance-session-roster", args=[session.pk])
+        )
+
+    def test_fr015_roster_lists_enrolled_students_with_status(self):
+        session = self.open_session()
+        AttendanceRecord.objects.create(
+            session=session, student=self.students[1], status="ABSENT"
+        )
+
+        response = self.roster(session)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["session"]["id"], session.pk)
+        self.assertEqual(
+            [(s["student_id"], s["status"]) for s in body["students"]],
+            [(self.students[0].pk, None), (self.students[1].pk, "absent")],
+        )
+        self.assertEqual((body["marked"], body["total"]), (1, 2))
+
+    def test_fr015_unenrolled_and_inactive_students_are_excluded(self):
+        session = self.open_session()
+        self.students[1].is_active = False
+        self.students[1].save()
+
+        body = self.roster(session).json()
+
+        self.assertEqual([s["student_id"] for s in body["students"]], [self.students[0].pk])
+
+    def test_fr015_status_is_per_session(self):
+        session = self.open_session()
+        other = self.open_session(on=date(2026, 10, 19))
+        AttendanceRecord.objects.create(
+            session=other, student=self.students[0], status="PRESENT"
+        )
+
+        body = self.roster(session).json()
+
+        self.assertEqual({s["status"] for s in body["students"]}, {None})
+
+    def test_fr015_roster_visible_to_assigned_faculty_and_admin_only(self):
+        session = self.open_session()
+
+        self.assertEqual(self.roster(session).status_code, 200)
+        self.assertEqual(self.roster(session, self.admin).status_code, 200)
+        self.assertEqual(self.roster(session, self.other_faculty).status_code, 403)
+        with self.assertLogs("users.permissions", level="WARNING"):
+            self.assertEqual(self.roster(session, self.students[0]).status_code, 403)
+
+    def test_fr015_roster_uses_constant_number_of_queries(self):
+        session = self.open_session()
+        extra = [
+            User.objects.create_user(
+                email=f"extra{i}@example.com", name=f"Extra {i}", role="student"
+            )
+            for i in range(20)
+        ]
+        Enrollment.objects.bulk_create(
+            [Enrollment(section=self.section, student=s) for s in extra]
+        )
+        self.as_user(self.faculty)
+
+        with self.assertNumQueries(2):
+            response = self.client.get(
+                reverse("attendance-session-roster", args=[session.pk])
+            )
+
+        self.assertEqual(response.json()["total"], 22)

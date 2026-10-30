@@ -62,3 +62,23 @@ def session_data(session):
             "end_time": slot.end_time.strftime("%H:%M"),
         },
     }
+
+
+def roster_data(session, students):
+    entries = [
+        {
+            "student_id": student.pk,
+            "name": student.name,
+            "email": student.email,
+            "status": student.attendance_status.lower()
+            if student.attendance_status
+            else None,
+        }
+        for student in students
+    ]
+    return {
+        "session": session_data(session),
+        "students": entries,
+        "marked": sum(entry["status"] is not None for entry in entries),
+        "total": len(entries),
+    }

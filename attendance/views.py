@@ -9,6 +9,7 @@ from .serializers import (
     AttendanceSubmissionSerializer,
     StartSessionSerializer,
     record_data,
+    roster_data,
     session_data,
 )
 from .services import submit_records
@@ -69,3 +70,13 @@ class SessionDetailView(APIView):
         return Response(
             session_data(services.get_session_for_user(request.user, session_id))
         )
+
+
+class SessionRosterView(APIView):
+    """FR-015: the enrolled-student roster for a session, with marked status."""
+
+    allowed_roles = FACULTY_OR_ADMIN
+
+    def get(self, request, session_id):
+        session = services.get_session_for_user(request.user, session_id)
+        return Response(roster_data(session, services.session_roster(session)))
