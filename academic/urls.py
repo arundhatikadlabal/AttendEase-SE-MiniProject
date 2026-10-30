@@ -8,6 +8,7 @@ from .views import (
     CourseSectionListView,
     MySectionsView,
     SectionActivationView,
+    SectionCsvEnrollmentView,
     SectionDetailView,
     SectionEnrollmentDetailView,
     SectionEnrollmentListView,
@@ -28,6 +29,11 @@ urlpatterns = [
         "sections/<int:section_id>/enrollments",
         SectionEnrollmentListView.as_view(),
         name="academic-section-enrollments",
+    ),
+    path(
+        "sections/<int:section_id>/enrollments/csv",
+        SectionCsvEnrollmentView.as_view(),
+        name="academic-section-enrollments-csv",
     ),
     path(
         "sections/<int:section_id>/enrollments/<int:student_id>",

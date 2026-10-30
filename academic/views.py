@@ -13,6 +13,7 @@ from .models import Timetable
 from .serializers import (
     AssignmentSerializer,
     CourseSerializer,
+    CsvEnrollmentSerializer,
     EnrollmentSerializer,
     SectionSerializer,
     TimetableSlotSerializer,
@@ -275,3 +276,26 @@ class SectionActivationView(APIView):
         services.set_section_active(section, self.active)
         section = sections_queryset().get(pk=section.pk)
         return Response(section_data(section, include_course=True))
+
+
+class SectionCsvEnrollmentView(APIView):
+    """FR-010: admins bulk-enroll students into a section from a CSV upload."""
+
+    allowed_roles = ADMIN_ONLY
+
+    def post(self, request, section_id):
+        section = get_object_or_404(Section.objects.select_related("course"), pk=section_id)
+        serializer = CsvEnrollmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = services.enroll_students_from_csv(
+                section=section, upload=serializer.validated_data["file"]
+            )
+        except services.AcademicConflict as error:
+            return conflict_response(error)
+        except services.CsvEnrollmentError as error:
+            return Response({"errors": error.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"section_id": section.pk, **result},
+            status=status.HTTP_201_CREATED,
+        )
