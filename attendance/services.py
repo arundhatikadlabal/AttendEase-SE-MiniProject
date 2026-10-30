@@ -26,18 +26,22 @@ class DuplicateAttendance(APIException):
 def student_dashboard_courses(student):
     """FR-020: one attendance percentage per enrolled active course."""
     courses = {
-        section.course_id: section.course
-        for section in sections_for_user(student)
+        section.course_id: section.course for section in sections_for_user(student)
     }
-    return [
-        {
-            "course_id": course.pk,
-            "course_code": course.code,
-            "course_title": course.title,
-            "attendance_percentage": calculate_attendance_percentage(student, course),
-        }
-        for course in sorted(courses.values(), key=lambda item: item.code)
-    ]
+    results = []
+    for course in sorted(courses.values(), key=lambda item: item.code):
+        percentage = calculate_attendance_percentage(student, course)
+        results.append(
+            {
+                "course_id": course.pk,
+                "course_code": course.code,
+                "course_title": course.title,
+                "attendance_percentage": percentage,
+                "threshold": course.shortage_threshold,
+                "below_threshold": percentage < course.shortage_threshold,
+            }
+        )
+    return results
 
 
 def student_session_history(student):
@@ -210,7 +214,9 @@ def start_session(*, faculty, timetable_slot, date):
                 )
             }
         )
-    if AttendanceSession.objects.filter(timetable_slot=timetable_slot, date=date).exists():
+    if AttendanceSession.objects.filter(
+        timetable_slot=timetable_slot, date=date
+    ).exists():
         raise SessionConflict()
     try:
         with transaction.atomic():
