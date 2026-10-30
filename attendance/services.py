@@ -182,3 +182,39 @@ def session_roster(session):
         .annotate(attendance_status=Subquery(status))
         .order_by("name", "email")
     )
+
+
+def _require_open(session):
+    if session.closed:
+        raise ValidationError({"session": "Attendance session is closed."})
+    reject_future_date(session.date, field="session")
+
+
+def _locked_session_for_marking(faculty, session_id):
+    session = get_object_or_404(
+        AttendanceSession.objects.select_for_update().select_related("section"),
+        pk=session_id,
+    )
+    _require_assigned_faculty(faculty, session.section)
+    _require_open(session)
+    return session
+
+
+def mark_student(*, faculty, session_id, student_id, status):
+    """FR-016: set or change one student's mark while the session is open."""
+    with transaction.atomic():
+        session = _locked_session_for_marking(faculty, session_id)
+        enrolled = Enrollment.objects.filter(
+            section_id=session.section_id,
+            student_id=student_id,
+            student__role=User.Role.STUDENT,
+            student__is_active=True,
+        ).exists()
+        if not enrolled:
+            raise NotFound("This student is not enrolled in this section.")
+        record, _ = AttendanceRecord.objects.update_or_create(
+            session=session,
+            student_id=student_id,
+            defaults={"status": status.upper()},
+        )
+        return record

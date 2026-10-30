@@ -6,6 +6,7 @@ from .views import (
     SessionListView,
     SessionRosterView,
     SessionStartView,
+    StudentMarkView,
 )
 
 urlpatterns = [
@@ -25,5 +26,10 @@ urlpatterns = [
         "sessions/<int:session_id>/records",
         AttendanceRecordsView.as_view(),
         name="attendance-records",
+    ),
+    path(
+        "sessions/<int:session_id>/records/<int:student_id>",
+        StudentMarkView.as_view(),
+        name="attendance-student-mark",
     ),
 ]

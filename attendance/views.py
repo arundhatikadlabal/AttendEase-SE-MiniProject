@@ -8,6 +8,7 @@ from . import services
 from .serializers import (
     AttendanceSubmissionSerializer,
     StartSessionSerializer,
+    StudentMarkSerializer,
     record_data,
     roster_data,
     session_data,
@@ -80,3 +81,20 @@ class SessionRosterView(APIView):
     def get(self, request, session_id):
         session = services.get_session_for_user(request.user, session_id)
         return Response(roster_data(session, services.session_roster(session)))
+
+
+class StudentMarkView(APIView):
+    """FR-016: faculty mark one student present or absent (per-student toggle)."""
+
+    allowed_roles = (User.Role.FACULTY,)
+
+    def put(self, request, session_id, student_id):
+        serializer = StudentMarkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = services.mark_student(
+            faculty=request.user,
+            session_id=session_id,
+            student_id=student_id,
+            status=serializer.validated_data["status"],
+        )
+        return Response(record_data(record))
