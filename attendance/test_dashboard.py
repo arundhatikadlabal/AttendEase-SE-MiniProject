@@ -27,7 +27,9 @@ class StudentDashboardTests(TestCase):
             email="faculty@example.com", name="Faculty", role=User.Role.FACULTY
         )
         cls.course = Course.objects.create(code="CS101", title="Software Engineering")
-        cls.section = Section.objects.create(course=cls.course, code="A", faculty=cls.faculty)
+        cls.section = Section.objects.create(
+            course=cls.course, code="A", faculty=cls.faculty
+        )
         Enrollment.objects.create(section=cls.section, student=cls.student)
         Enrollment.objects.create(section=cls.section, student=cls.other_student)
         cls.closed_present = AttendanceSession.objects.create(
@@ -40,13 +42,19 @@ class StudentDashboardTests(TestCase):
             section=cls.section, date=date(2026, 10, 3), closed=False
         )
         AttendanceRecord.objects.create(
-            session=cls.closed_present, student=cls.student, status=AttendanceRecord.Status.PRESENT
+            session=cls.closed_present,
+            student=cls.student,
+            status=AttendanceRecord.Status.PRESENT,
         )
         AttendanceRecord.objects.create(
-            session=cls.closed_absent, student=cls.student, status=AttendanceRecord.Status.ABSENT
+            session=cls.closed_absent,
+            student=cls.student,
+            status=AttendanceRecord.Status.ABSENT,
         )
         AttendanceRecord.objects.create(
-            session=cls.open_session, student=cls.student, status=AttendanceRecord.Status.PRESENT
+            session=cls.open_session,
+            student=cls.student,
+            status=AttendanceRecord.Status.PRESENT,
         )
 
     def setUp(self):
@@ -66,7 +74,9 @@ class StudentDashboardTests(TestCase):
         other_course = Course.objects.create(code="CS202", title="Other")
         Section.objects.create(course=other_course, code="A", faculty=self.faculty)
         response = self.client.get(self.url)
-        self.assertEqual([item["course_code"] for item in response.data["courses"]], ["CS101"])
+        self.assertEqual(
+            [item["course_code"] for item in response.data["courses"]], ["CS101"]
+        )
 
     def test_fr022_flags_courses_below_their_own_threshold(self):
         course = self.client.get(self.url).data["courses"][0]
@@ -94,7 +104,9 @@ class StudentDashboardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         history = response.data["history"]
         self.assertEqual(len(history), 2)
-        self.assertEqual([item["date"] for item in history], ["2026-10-02", "2026-10-01"])
+        self.assertEqual(
+            [item["date"] for item in history], ["2026-10-02", "2026-10-01"]
+        )
         self.assertEqual([item["status"] for item in history], ["absent", "present"])
         self.assertTrue(all(item["course_code"] == "CS101" for item in history))
         self.assertTrue(all(item["section_code"] == "A" for item in history))
@@ -104,3 +116,29 @@ class StudentDashboardTests(TestCase):
         self.assertEqual(self.client.get(reverse("student-history")).status_code, 403)
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(reverse("student-history")).status_code, 401)
+
+    def test_fr023_history_filters_inclusive_date_range(self):
+        url = reverse("student-history")
+        response = self.client.get(url, {"from": "2026-10-02", "to": "2026-10-02"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["date"] for item in response.data["history"]], ["2026-10-02"]
+        )
+        self.assertEqual(
+            [
+                item["date"]
+                for item in self.client.get(url, {"to": "2026-10-01"}).data["history"]
+            ],
+            ["2026-10-01"],
+        )
+
+    def test_fr023_rejects_bad_or_reversed_dates(self):
+        url = reverse("student-history")
+        for query in (
+            {"from": "2026-02-30"},
+            {"to": "2026-1-02"},
+            {"from": "bad"},
+            {"from": "2026-10-03", "to": "2026-10-01"},
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get(url, query).status_code, 400)

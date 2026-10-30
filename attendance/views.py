@@ -1,4 +1,8 @@
+import re
+from datetime import date
+
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -33,7 +37,27 @@ class StudentHistoryView(APIView):
     allowed_roles = (User.Role.STUDENT,)
 
     def get(self, request):
-        return Response({"history": services.student_session_history(request.user)})
+        dates = {}
+        for key in ("from", "to"):
+            raw = request.query_params.get(key)
+            if raw is None:
+                dates[key] = None
+                continue
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+                raise ValidationError({key: "Use YYYY-MM-DD."})
+            try:
+                dates[key] = date.fromisoformat(raw)
+            except ValueError as error:
+                raise ValidationError({key: "Enter a valid date."}) from error
+        if dates["from"] and dates["to"] and dates["from"] > dates["to"]:
+            raise ValidationError({"from": "Must be on or before to."})
+        return Response(
+            {
+                "history": services.student_session_history(
+                    request.user, from_date=dates["from"], to_date=dates["to"]
+                )
+            }
+        )
 
 
 class AttendanceRecordsView(APIView):
