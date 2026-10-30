@@ -68,11 +68,37 @@ def _section_code_taken(course, code, exclude_pk=None):
     return queryset.exists()
 
 
+INACTIVE_COURSE_MESSAGE = "This course is deactivated."
+INACTIVE_SECTION_MESSAGE = "This section or its course is deactivated."
+
+
+def require_active_section(section):
+    """FR-012: no new enrollments, periods or sessions for inactive sections."""
+    if not section.is_active or not section.course.is_active:
+        raise AcademicConflict("section", INACTIVE_SECTION_MESSAGE)
+
+
+def set_course_active(course, active):
+    """FR-012: deactivate (or reactivate) a course; its data is kept."""
+    course.is_active = active
+    course.save(update_fields=["is_active"])
+    return course
+
+
+def set_section_active(section, active):
+    """FR-012: deactivate (or reactivate) a section; its data is kept."""
+    section.is_active = active
+    section.save(update_fields=["is_active"])
+    return section
+
+
 def create_section(*, course, code):
     """FR-007 / FR-011: create a section whose code is unique within its course.
 
     Faculty is assigned separately (FR-013).
     """
+    if not course.is_active:
+        raise AcademicConflict("course", INACTIVE_COURSE_MESSAGE)
     code = normalize_code(code)
     if _section_code_taken(course, code):
         raise AcademicConflict("code", DUPLICATE_SECTION_MESSAGE)
@@ -103,6 +129,7 @@ DUPLICATE_ENROLLMENT_MESSAGE = "This student is already enrolled in this section
 def enroll_student(*, section, student):
     """FR-008: enroll a student into a section exactly once."""
     _require_role(student, User.Role.STUDENT, "student")
+    require_active_section(section)
     if Enrollment.objects.filter(section=section, student=student).exists():
         raise AcademicConflict("student_id", DUPLICATE_ENROLLMENT_MESSAGE)
     try:
@@ -125,6 +152,7 @@ def add_timetable_slot(*, section, day_of_week, start_time, end_time):
     """FR-009: add a weekly period, rejecting overlaps within the same section."""
     if end_time <= start_time:
         raise ValueError("end_time must be after start_time")
+    require_active_section(section)
     overlapping = Timetable.objects.filter(
         section=section,
         day_of_week=day_of_week,
@@ -158,6 +186,7 @@ def sections_for_user(user):
     queryset = Section.objects.select_related("course", "faculty").prefetch_related(
         "timetable_slots"
     )
+    queryset = queryset.filter(is_active=True, course__is_active=True)
     if user.role == User.Role.FACULTY:
         return queryset.filter(faculty=user).order_by("course__code", "code")
     if user.role == User.Role.STUDENT:

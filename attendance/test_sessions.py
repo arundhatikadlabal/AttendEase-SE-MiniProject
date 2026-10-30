@@ -576,3 +576,21 @@ class SessionTimestampTests(SessionTestCase):
         session = AttendanceSession.objects.get(pk=response.json()["id"])
         self.assertGreater(session.created_at.year, 2020)
         self.assertIsNone(session.closed_at)
+
+
+class InactiveSectionTests(SessionTestCase):
+    """FR-012: sessions cannot start in a deactivated section or course."""
+
+    def test_fr012_no_session_for_inactive_section_or_course(self):
+        self.section.is_active = False
+        self.section.save()
+        inactive_section = self.start()
+        self.section.is_active = True
+        self.section.save()
+        self.course.is_active = False
+        self.course.save()
+        inactive_course = self.start()
+
+        self.assertEqual(inactive_section.status_code, 400)
+        self.assertEqual(inactive_course.status_code, 400)
+        self.assertFalse(AttendanceSession.objects.exists())

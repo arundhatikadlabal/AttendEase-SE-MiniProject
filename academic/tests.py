@@ -568,3 +568,116 @@ class FacultyAssignmentTests(AcademicTestCase):
             response = self.as_user(self.admin).get(reverse("academic-my-sections"))
 
         self.assertEqual(response.status_code, 403)
+
+
+class DeactivationTests(AcademicTestCase):
+    """FR-012: administrators deactivate a course or section."""
+
+    def setUp(self):
+        super().setUp()
+        self.course = self.make_course()
+        self.section = self.make_section(self.course, faculty=self.faculty)
+        Enrollment.objects.create(section=self.section, student=self.student)
+
+    def deactivate_section(self, user=None):
+        return self.as_user(user or self.admin).post(
+            reverse("academic-section-deactivate", args=[self.section.pk])
+        )
+
+    def deactivate_course(self, user=None):
+        return self.as_user(user or self.admin).post(
+            reverse("academic-course-deactivate", args=[self.course.pk])
+        )
+
+    def test_fr012_admin_deactivates_and_reactivates_section(self):
+        response = self.deactivate_section()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["is_active"])
+        self.section.refresh_from_db()
+        self.assertFalse(self.section.is_active)
+
+        restored = self.client.post(
+            reverse("academic-section-activate", args=[self.section.pk])
+        )
+        self.assertTrue(restored.json()["is_active"])
+
+    def test_fr012_admin_deactivates_course(self):
+        response = self.deactivate_course()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["is_active"])
+        self.course.refresh_from_db()
+        self.assertFalse(self.course.is_active)
+
+    def test_fr012_only_admins_can_deactivate(self):
+        for user in (self.faculty, self.student):
+            with self.subTest(role=user.role), self.assertLogs(
+                "users.permissions", level="WARNING"
+            ):
+                self.assertEqual(self.deactivate_section(user).status_code, 403)
+                self.assertEqual(self.deactivate_course(user).status_code, 403)
+        self.section.refresh_from_db()
+        self.assertTrue(self.section.is_active)
+
+    def test_fr012_inactive_items_hidden_from_non_admins(self):
+        other = self.make_section(self.course, code="B")
+        self.deactivate_section()
+
+        student_view = self.as_user(self.student).get(reverse("academic-courses"))
+        admin_view = self.as_user(self.admin).get(reverse("academic-courses"))
+        hidden = self.as_user(self.faculty).get(
+            reverse("academic-section", args=[self.section.pk])
+        )
+        my_sections = self.as_user(self.faculty).get(reverse("academic-my-sections"))
+
+        self.assertEqual(
+            [s["id"] for s in student_view.json()[0]["sections"]], [other.pk]
+        )
+        self.assertEqual(len(admin_view.json()[0]["sections"]), 2)
+        self.assertEqual(hidden.status_code, 404)
+        self.assertEqual(my_sections.json(), [])
+
+    def test_fr012_inactive_course_hidden_with_its_sections(self):
+        self.deactivate_course()
+
+        listed = self.as_user(self.student).get(reverse("academic-courses"))
+        detail = self.client.get(reverse("academic-course", args=[self.course.pk]))
+        sections = self.client.get(
+            reverse("academic-course-sections", args=[self.course.pk])
+        )
+
+        self.assertEqual(listed.json(), [])
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(sections.status_code, 404)
+
+    def test_fr012_no_new_enrollments_periods_or_sections_when_inactive(self):
+        other_student = get_user_model().objects.create_user(
+            email="s2@example.com", name="S2", role="student", password=PASSWORD
+        )
+        self.deactivate_section()
+
+        enroll = self.as_user(self.admin).post(
+            reverse("academic-section-enrollments", args=[self.section.pk]),
+            {"student_id": other_student.pk},
+        )
+        period = self.client.post(
+            reverse("academic-section-timetable", args=[self.section.pk]),
+            {"day_of_week": 1, "start_time": "09:00", "end_time": "10:00"},
+        )
+        self.deactivate_course()
+        new_section = self.client.post(
+            reverse("academic-course-sections", args=[self.course.pk]), {"code": "Z"}
+        )
+
+        self.assertEqual(enroll.status_code, 409)
+        self.assertEqual(period.status_code, 409)
+        self.assertEqual(new_section.status_code, 409)
+
+    def test_fr012_data_is_kept_when_deactivated(self):
+        self.deactivate_course()
+
+        self.assertTrue(Section.objects.filter(pk=self.section.pk).exists())
+        self.assertTrue(
+            Enrollment.objects.filter(section=self.section, student=self.student).exists()
+        )

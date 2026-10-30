@@ -2,10 +2,12 @@ from django.urls import path
 
 from .views import (
     AssignmentView,
+    CourseActivationView,
     CourseDetailView,
     CourseListView,
     CourseSectionListView,
     MySectionsView,
+    SectionActivationView,
     SectionDetailView,
     SectionEnrollmentDetailView,
     SectionEnrollmentListView,
@@ -41,6 +43,26 @@ urlpatterns = [
         "timetable/<int:slot_id>",
         TimetableSlotDetailView.as_view(),
         name="academic-timetable-slot",
+    ),
+    path(
+        "courses/<int:course_id>/deactivate",
+        CourseActivationView.as_view(active=False),
+        name="academic-course-deactivate",
+    ),
+    path(
+        "courses/<int:course_id>/activate",
+        CourseActivationView.as_view(active=True),
+        name="academic-course-activate",
+    ),
+    path(
+        "sections/<int:section_id>/deactivate",
+        SectionActivationView.as_view(active=False),
+        name="academic-section-deactivate",
+    ),
+    path(
+        "sections/<int:section_id>/activate",
+        SectionActivationView.as_view(active=True),
+        name="academic-section-activate",
     ),
     path("assignments", AssignmentView.as_view(), name="academic-assignments"),
     path("my-sections", MySectionsView.as_view(), name="academic-my-sections"),

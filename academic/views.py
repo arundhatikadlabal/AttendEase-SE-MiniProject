@@ -30,18 +30,29 @@ def conflict_response(error):
     return Response({error.field: [error.message]}, status=status.HTTP_409_CONFLICT)
 
 
-def sections_queryset():
-    return (
+def sees_inactive(user):
+    """FR-012: only admins see deactivated courses and sections."""
+    return user.role == User.Role.ADMIN
+
+
+def sections_queryset(user=None):
+    queryset = (
         Section.objects.select_related("course", "faculty")
         .prefetch_related("timetable_slots")
         .order_by("code")
     )
+    if user is not None and not sees_inactive(user):
+        queryset = queryset.filter(is_active=True, course__is_active=True)
+    return queryset
 
 
-def courses_queryset():
-    return Course.objects.prefetch_related(
-        Prefetch("sections", queryset=sections_queryset())
+def courses_queryset(user=None):
+    queryset = Course.objects.prefetch_related(
+        Prefetch("sections", queryset=sections_queryset(user))
     ).order_by("code")
+    if user is not None and not sees_inactive(user):
+        queryset = queryset.filter(is_active=True)
+    return queryset
 
 
 class CourseListView(APIView):
@@ -50,7 +61,9 @@ class CourseListView(APIView):
     roles_by_method = {"GET": ANY_ROLE, "POST": ADMIN_ONLY}
 
     def get(self, request):
-        return Response([course_data(course) for course in courses_queryset()])
+        return Response(
+            [course_data(course) for course in courses_queryset(request.user)]
+        )
 
     def post(self, request):
         serializer = CourseSerializer(data=request.data)
@@ -68,7 +81,9 @@ class CourseDetailView(APIView):
     roles_by_method = {"GET": ANY_ROLE, "PATCH": ADMIN_ONLY}
 
     def get(self, request, course_id):
-        return Response(course_data(get_object_or_404(courses_queryset(), pk=course_id)))
+        return Response(
+            course_data(get_object_or_404(courses_queryset(request.user), pk=course_id))
+        )
 
     def patch(self, request, course_id):
         course = get_object_or_404(Course, pk=course_id)
@@ -87,9 +102,12 @@ class CourseSectionListView(APIView):
     roles_by_method = {"GET": ANY_ROLE, "POST": ADMIN_ONLY}
 
     def get(self, request, course_id):
-        course = get_object_or_404(Course, pk=course_id)
+        course = get_object_or_404(courses_queryset(request.user), pk=course_id)
         return Response(
-            [section_data(section) for section in sections_queryset().filter(course=course)]
+            [
+                section_data(section)
+                for section in sections_queryset(request.user).filter(course=course)
+            ]
         )
 
     def post(self, request, course_id):
@@ -110,7 +128,7 @@ class SectionDetailView(APIView):
     roles_by_method = {"GET": ANY_ROLE, "PATCH": ADMIN_ONLY}
 
     def get(self, request, section_id):
-        section = get_object_or_404(sections_queryset(), pk=section_id)
+        section = get_object_or_404(sections_queryset(request.user), pk=section_id)
         return Response(section_data(section, include_course=True))
 
     def patch(self, request, section_id):
@@ -232,3 +250,28 @@ class MySectionsView(APIView):
                 for section in services.sections_for_user(request.user)
             ]
         )
+
+
+class CourseActivationView(APIView):
+    """FR-012: admins deactivate or reactivate a course."""
+
+    allowed_roles = ADMIN_ONLY
+    active = False
+
+    def post(self, request, course_id):
+        course = get_object_or_404(Course, pk=course_id)
+        services.set_course_active(course, self.active)
+        return Response(course_data(get_object_or_404(courses_queryset(), pk=course_id)))
+
+
+class SectionActivationView(APIView):
+    """FR-012: admins deactivate or reactivate a section."""
+
+    allowed_roles = ADMIN_ONLY
+    active = False
+
+    def post(self, request, section_id):
+        section = get_object_or_404(Section, pk=section_id)
+        services.set_section_active(section, self.active)
+        section = sections_queryset().get(pk=section.pk)
+        return Response(section_data(section, include_course=True))
