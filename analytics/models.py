@@ -1,6 +1,7 @@
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Course(models.Model):
@@ -79,6 +80,8 @@ class AttendanceSession(models.Model):
         blank=True,
         related_name="attendance_sessions",
     )
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+    closed_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         constraints = [

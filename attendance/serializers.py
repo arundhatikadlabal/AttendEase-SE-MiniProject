@@ -52,6 +52,8 @@ def session_data(session):
         "id": session.pk,
         "date": session.date.isoformat(),
         "closed": session.closed,
+        "created_at": session.created_at.isoformat(),
+        "closed_at": session.closed_at.isoformat() if session.closed_at else None,
         "section": {
             "id": section.pk,
             "code": section.code,

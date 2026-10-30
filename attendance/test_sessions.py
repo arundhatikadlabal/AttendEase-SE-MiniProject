@@ -518,3 +518,61 @@ class CloseSessionTests(SessionTestCase):
         self.assertEqual(before, 0)
         self.assertEqual(calculate_attendance_percentage(self.students[0], self.course), 100)
         self.assertEqual(calculate_attendance_percentage(self.students[1], self.course), 0)
+
+
+class SessionTimestampTests(SessionTestCase):
+    """FR-019: sessions are timestamped on creation and closure."""
+
+    def test_fr019_creation_is_timestamped(self):
+        before = timezone.now()
+        response = self.start()
+        after = timezone.now()
+
+        session = AttendanceSession.objects.get()
+        self.assertTrue(before <= session.created_at <= after)
+        self.assertIsNone(session.closed_at)
+        self.assertEqual(response.json()["created_at"], session.created_at.isoformat())
+        self.assertIsNone(response.json()["closed_at"])
+
+    def test_fr019_closure_is_timestamped(self):
+        session = self.open_session()
+        before = timezone.now()
+
+        response = self.as_user(self.faculty).post(
+            reverse("attendance-session-close", args=[session.pk])
+        )
+
+        session.refresh_from_db()
+        self.assertTrue(before <= session.closed_at <= timezone.now())
+        self.assertGreaterEqual(session.closed_at, session.created_at)
+        self.assertEqual(
+            response.json()["session"]["closed_at"], session.closed_at.isoformat()
+        )
+
+    def test_fr019_failed_second_close_keeps_original_timestamp(self):
+        session = self.open_session()
+        self.as_user(self.faculty).post(
+            reverse("attendance-session-close", args=[session.pk])
+        )
+        session.refresh_from_db()
+        first = session.closed_at
+
+        self.client.post(reverse("attendance-session-close", args=[session.pk]))
+
+        session.refresh_from_db()
+        self.assertEqual(session.closed_at, first)
+
+    def test_fr019_timestamps_cannot_be_set_by_the_client(self):
+        response = self.as_user(self.faculty).post(
+            reverse("attendance-session-start"),
+            {
+                "timetable_slot_id": self.monday_slot.pk,
+                "date": MONDAY.isoformat(),
+                "created_at": "2020-01-01T00:00:00Z",
+                "closed_at": "2020-01-01T00:00:00Z",
+            },
+        )
+
+        session = AttendanceSession.objects.get(pk=response.json()["id"])
+        self.assertGreater(session.created_at.year, 2020)
+        self.assertIsNone(session.closed_at)
