@@ -1,7 +1,7 @@
 """Attendance sessions and records over the shared analytics models (FR-014 to FR-019, FR-037)."""
 
 from django.db import IntegrityError, transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Prefetch, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import (
@@ -37,6 +37,42 @@ def student_dashboard_courses(student):
             "attendance_percentage": calculate_attendance_percentage(student, course),
         }
         for course in sorted(courses.values(), key=lambda item: item.code)
+    ]
+
+
+def student_session_history(student):
+    """FR-021: the student's finalized sessions, including unmarked absences."""
+    sessions = (
+        AttendanceSession.objects.filter(
+            section__enrollments__student=student, closed=True
+        )
+        .select_related("section__course")
+        .prefetch_related(
+            Prefetch(
+                "records",
+                queryset=AttendanceRecord.objects.filter(student=student),
+                to_attr="student_records",
+            )
+        )
+        .distinct()
+        .order_by("-date", "-pk")
+    )
+    return [
+        {
+            "session_id": session.pk,
+            "date": session.date.isoformat(),
+            "course_id": session.section.course_id,
+            "course_code": session.section.course.code,
+            "course_title": session.section.course.title,
+            "section_id": session.section_id,
+            "section_code": session.section.code,
+            "status": (
+                session.student_records[0].status.lower()
+                if session.student_records
+                else "absent"
+            ),
+        }
+        for session in sessions
     ]
 
 
