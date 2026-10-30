@@ -144,6 +144,8 @@ def start_session(*, faculty, timetable_slot, date):
     section = timetable_slot.section
     _require_assigned_faculty(faculty, section)
     reject_future_date(date)
+    if not section.is_active or not section.course.is_active:
+        raise ValidationError({"section": "This section or its course is deactivated."})
     if date.isoweekday() != timetable_slot.day_of_week:
         raise ValidationError(
             {

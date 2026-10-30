@@ -12,6 +12,7 @@ class Course(models.Model):
         decimal_places=2,
         default=75.00,
     )
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.code} - {self.title}"
@@ -31,6 +32,7 @@ class Section(models.Model):
         null=True,
         blank=True,
     )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         constraints = [

@@ -67,6 +67,7 @@ def section_data(section, include_course=False):
     data = {
         "id": section.pk,
         "code": section.code,
+        "is_active": section.is_active,
         "faculty": person_data(section.faculty),
         "timetable": [timetable_slot_data(slot) for slot in section.timetable_slots.all()],
     }
@@ -81,5 +82,6 @@ def course_data(course):
         "id": course.pk,
         "code": course.code,
         "title": course.title,
+        "is_active": course.is_active,
         "sections": [section_data(section) for section in course.sections.all()],
     }
