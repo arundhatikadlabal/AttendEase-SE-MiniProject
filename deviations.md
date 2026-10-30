@@ -64,3 +64,15 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Why:** A second copy of these tables would split enrollment data between two apps. Moving the models into `academic` is possible later, as a migration agreed with the analytics owner.
 
 **Introduced in:** `feature/fr-006-course-management` (reuse) and `feature/fr-007-section-management` (nullable faculty).
+
+## Attendance recording (Role 2 — Arundhati K)
+
+### D-06: Attendance sessions are linked to a timetable period (FR-014)
+
+**Documents:** SRS Appendix B.1 lists AttendanceSession fields as `id, section_id, date, status, created_at, closed_at`. FR-014 says faculty start a session "for a scheduled section period".
+
+**Implementation:** `analytics.AttendanceSession` gains a nullable `timetable_slot` link to `academic.Timetable`, plus a unique constraint on (period, date). `POST /api/attendance/sessions/start` takes `{timetable_slot_id, date}`, and `date` defaults to today. The date must fall on the period's weekday. Starting a second session for the same period and date returns 409. Only the section's assigned faculty member can start it.
+
+**Why:** Without a link to the period, "scheduled section period" can't be checked, and one class could be recorded twice on the same day. The link is nullable, so sessions created before this change, and the existing tests that create them directly, still work.
+
+**Introduced in:** `feature/fr-014-start-session`.

@@ -1,8 +1,13 @@
-"""Attendance writes over the shared analytics models (FR-037)."""
+"""Attendance sessions and records over the shared analytics models (FR-014 to FR-019, FR-037)."""
 
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.exceptions import (
+    APIException,
+    NotFound,
+    PermissionDenied,
+    ValidationError,
+)
 
 from analytics.models import AttendanceRecord, AttendanceSession, Enrollment
 from users.models import User
@@ -75,3 +80,72 @@ def submit_records(*, faculty, session_id, records):
             if existing.exists():
                 raise DuplicateAttendance() from error
             raise
+
+
+class SessionConflict(APIException):
+    status_code = 409
+    default_detail = "An attendance session already exists for this period and date."
+    default_code = "session_exists"
+
+
+def _require_assigned_faculty(user, section):
+    if (
+        not user.is_active
+        or user.role != User.Role.FACULTY
+        or section.faculty_id != user.pk
+    ):
+        raise PermissionDenied("You are not assigned to this section.")
+
+
+def sessions_for_user(user):
+    """Faculty see sessions for sections they teach; admins see every session."""
+    queryset = AttendanceSession.objects.select_related(
+        "section__course", "timetable_slot"
+    ).order_by("-date", "timetable_slot__start_time", "pk")
+    if user.role == User.Role.ADMIN:
+        return queryset
+    if user.role == User.Role.FACULTY:
+        return queryset.filter(section__faculty=user)
+    return queryset.none()
+
+
+def get_session_for_user(user, session_id):
+    """Return a session the caller may see, or raise 404 / 403."""
+    session = (
+        AttendanceSession.objects.select_related("section__course", "timetable_slot")
+        .filter(pk=session_id)
+        .first()
+    )
+    if session is None:
+        raise NotFound("Attendance session not found.")
+    if user.role != User.Role.ADMIN:
+        _require_assigned_faculty(user, session.section)
+    return session
+
+
+def start_session(*, faculty, timetable_slot, date):
+    """FR-014: start a session for one of the faculty member's scheduled periods.
+
+    The date must fall on the period's weekday, and each period can only have
+    one session per date.
+    """
+    section = timetable_slot.section
+    _require_assigned_faculty(faculty, section)
+    if date.isoweekday() != timetable_slot.day_of_week:
+        raise ValidationError(
+            {
+                "date": (
+                    f"{date.isoformat()} is a {date.strftime('%A')}, but this period "
+                    f"is scheduled on {timetable_slot.get_day_of_week_display()}."
+                )
+            }
+        )
+    if AttendanceSession.objects.filter(timetable_slot=timetable_slot, date=date).exists():
+        raise SessionConflict()
+    try:
+        with transaction.atomic():
+            return AttendanceSession.objects.create(
+                section=section, timetable_slot=timetable_slot, date=date
+            )
+    except IntegrityError as error:
+        raise SessionConflict() from error

@@ -72,6 +72,21 @@ class AttendanceSession(models.Model):
     )
     date = models.DateField()
     closed = models.BooleanField(default=False)
+    timetable_slot = models.ForeignKey(
+        "academic.Timetable",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="attendance_sessions",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["timetable_slot", "date"],
+                name="unique_attendance_session_per_period_per_date",
+            )
+        ]
 
 
 class AttendanceRecord(models.Model):
