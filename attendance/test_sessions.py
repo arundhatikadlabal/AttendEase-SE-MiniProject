@@ -370,3 +370,78 @@ class MarkStudentTests(SessionTestCase):
         self.assertEqual(other.status_code, 403)
         self.assertEqual(admin.status_code, 403)
         self.assertFalse(session.records.exists())
+
+
+class MarkAllPresentTests(SessionTestCase):
+    """FR-017: faculty bulk-mark all students present with a single action."""
+
+    def mark_all(self, session, user=None):
+        return self.as_user(user or self.faculty).post(
+            reverse("attendance-mark-all-present", args=[session.pk])
+        )
+
+    def test_tc04_start_session_then_bulk_mark_all_present(self):
+        """TC-04 (FR-014, FR-016, FR-017): roster shows every student present."""
+        faculty = self.jwt_client(self.faculty)
+        started = faculty.post(
+            reverse("attendance-session-start"),
+            {"timetable_slot_id": self.monday_slot.pk, "date": MONDAY.isoformat()},
+        )
+        self.assertEqual(started.status_code, 201)
+        session_id = started.json()["id"]
+
+        bulk = faculty.post(reverse("attendance-mark-all-present", args=[session_id]))
+
+        self.assertEqual(bulk.status_code, 200)
+        roster = faculty.get(reverse("attendance-session-roster", args=[session_id]))
+        body = roster.json()
+        self.assertEqual(body["total"], 2)
+        self.assertEqual(body["marked"], 2)
+        self.assertEqual({s["status"] for s in body["students"]}, {"present"})
+        self.assertEqual(
+            AttendanceRecord.objects.filter(session_id=session_id).count(), 2
+        )
+
+    def test_fr017_overrides_earlier_absent_marks_without_duplicates(self):
+        session = self.open_session()
+        AttendanceRecord.objects.create(
+            session=session, student=self.students[0], status="ABSENT"
+        )
+
+        response = self.mark_all(session)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(session.records.count(), 2)
+        self.assertEqual(set(session.records.values_list("status", flat=True)), {"PRESENT"})
+
+    def test_fr017_is_safe_to_repeat(self):
+        session = self.open_session()
+        self.mark_all(session)
+
+        response = self.mark_all(session)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(session.records.count(), 2)
+
+    def test_fr017_individual_student_can_then_be_marked_absent(self):
+        session = self.open_session()
+        self.mark_all(session)
+
+        self.client.put(
+            reverse("attendance-student-mark", args=[session.pk, self.students[1].pk]),
+            {"status": "absent"},
+            format="json",
+        )
+
+        self.assertEqual(
+            session.records.get(student=self.students[1]).status, "ABSENT"
+        )
+
+    def test_fr017_closed_session_and_other_faculty_are_rejected(self):
+        session = self.open_session()
+
+        self.assertEqual(self.mark_all(session, self.other_faculty).status_code, 403)
+        session.closed = True
+        session.save()
+        self.assertEqual(self.mark_all(session).status_code, 400)
+        self.assertFalse(session.records.exists())
