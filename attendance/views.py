@@ -1,6 +1,7 @@
 import re
 from datetime import date
 
+from django.views.generic import TemplateView
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -20,6 +21,12 @@ from .serializers import (
 from .services import submit_records
 
 FACULTY_OR_ADMIN = (User.Role.FACULTY, User.Role.ADMIN)
+
+
+class StudentPortalView(TemplateView):
+    """NFR-007: responsive page; all student data still comes from protected APIs."""
+
+    template_name = "attendance/student_portal.html"
 
 
 class StudentDashboardView(APIView):
