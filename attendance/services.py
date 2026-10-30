@@ -2,6 +2,7 @@
 
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework.exceptions import (
     APIException,
     NotFound,
@@ -37,6 +38,7 @@ def submit_records(*, faculty, session_id, records):
             raise PermissionDenied("You are not assigned to this section.")
         if session.closed:
             raise ValidationError({"session": "Attendance session is closed."})
+        reject_future_date(session.date, field="session")
 
         student_ids = [record["student_id"] for record in records]
         if len(student_ids) != len(set(student_ids)):
@@ -80,6 +82,15 @@ def submit_records(*, faculty, session_id, records):
             if existing.exists():
                 raise DuplicateAttendance() from error
             raise
+
+
+FUTURE_DATE_MESSAGE = "Attendance cannot be recorded for a future date."
+
+
+def reject_future_date(value, field="date"):
+    """NFR-004: no session or attendance may be dated after today."""
+    if value > timezone.localdate():
+        raise ValidationError({field: FUTURE_DATE_MESSAGE})
 
 
 class SessionConflict(APIException):
@@ -131,6 +142,7 @@ def start_session(*, faculty, timetable_slot, date):
     """
     section = timetable_slot.section
     _require_assigned_faculty(faculty, section)
+    reject_future_date(date)
     if date.isoweekday() != timetable_slot.day_of_week:
         raise ValidationError(
             {
