@@ -1,10 +1,13 @@
 """Performance tests for the attendance roster (NFR-001, NFR-002 / TC-11)."""
 
+import statistics
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from datetime import time as clock
 
-from django.test import TestCase
+from django.db import connections
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -15,6 +18,8 @@ from users.models import User
 PASSWORD = "StrongPass123!"
 CLASS_SIZE = 80
 ROSTER_LIMIT_SECONDS = 3.0
+CONCURRENT_USERS = 50
+REQUEST_LIMIT_SECONDS = 2.0
 
 
 def build_section(class_size=CLASS_SIZE):
@@ -100,3 +105,72 @@ class RosterPerformanceTests(TestCase):
             response = client.get(url)
 
         self.assertEqual(response.json()["total"], CLASS_SIZE)
+
+
+def percentile(values, fraction):
+    ordered = sorted(values)
+    index = max(0, round(fraction * len(ordered)) - 1)
+    return ordered[index]
+
+
+class ConcurrentLoadTests(TransactionTestCase):
+    """NFR-001 / TC-11: 95% of requests finish within 2 s with 50 concurrent users.
+
+    TransactionTestCase commits the data, so every worker thread (each with its
+    own database connection) sees the same section.
+    """
+
+    def setUp(self):
+        self.faculty, self.session = build_section()
+        self.client = jwt_client(self.faculty)
+        self.token = self.client._credentials["HTTP_AUTHORIZATION"]
+
+    def timed_request(self, url):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=self.token)
+        try:
+            started = time.perf_counter()
+            response = client.get(url)
+            return response.status_code, time.perf_counter() - started
+        finally:
+            connections.close_all()
+
+    def run_concurrently(self, url, users=CONCURRENT_USERS):
+        with ThreadPoolExecutor(max_workers=users) as pool:
+            return list(pool.map(self.timed_request, [url] * users))
+
+    def test_tc11_50_concurrent_roster_requests_within_2_seconds(self):
+        url = reverse("attendance-session-roster", args=[self.session.pk])
+
+        results = self.run_concurrently(url)
+
+        statuses = [code for code, _ in results]
+        timings = [seconds for _, seconds in results]
+        self.assertEqual(statuses, [200] * CONCURRENT_USERS)
+        p95 = percentile(timings, 0.95)
+        print(
+            f"\nTC-11 roster x{CONCURRENT_USERS}: "
+            f"median {statistics.median(timings):.3f}s, "
+            f"p95 {p95:.3f}s, max {max(timings):.3f}s"
+        )
+        self.assertLess(p95, REQUEST_LIMIT_SECONDS)
+
+    def test_nfr001_mixed_api_requests_under_concurrent_load(self):
+        urls = [
+            reverse("attendance-session-roster", args=[self.session.pk]),
+            reverse("attendance-sessions"),
+            reverse("attendance-session", args=[self.session.pk]),
+            reverse("academic-courses"),
+            reverse("academic-my-sections"),
+        ] * (CONCURRENT_USERS // 5)
+
+        with ThreadPoolExecutor(max_workers=CONCURRENT_USERS) as pool:
+            results = list(pool.map(self.timed_request, urls))
+
+        self.assertTrue(all(code == 200 for code, _ in results))
+        timings = [seconds for _, seconds in results]
+        self.assertLess(percentile(timings, 0.95), REQUEST_LIMIT_SECONDS)
+
+    def test_percentile_helper(self):
+        self.assertEqual(percentile(list(range(1, 101)), 0.95), 95)
+        self.assertEqual(percentile([0.5], 0.95), 0.5)
