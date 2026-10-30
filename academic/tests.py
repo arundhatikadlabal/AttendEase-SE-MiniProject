@@ -1,6 +1,7 @@
 from datetime import time
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
@@ -681,3 +682,92 @@ class DeactivationTests(AcademicTestCase):
         self.assertTrue(
             Enrollment.objects.filter(section=self.section, student=self.student).exists()
         )
+
+
+class CsvEnrollmentTests(AcademicTestCase):
+    """FR-010: bulk student enrollment via CSV upload."""
+
+    def setUp(self):
+        super().setUp()
+        self.section = self.make_section(self.make_course(), faculty=self.faculty)
+        self.url = reverse("academic-section-enrollments-csv", args=[self.section.pk])
+        self.more = [
+            get_user_model().objects.create_user(
+                email=f"bulk{i}@example.com", name=f"Bulk {i}", role="student",
+                password=PASSWORD,
+            )
+            for i in range(3)
+        ]
+
+    def upload(self, text, user=None, name="students.csv"):
+        file = SimpleUploadedFile(name, text.encode("utf-8"), content_type="text/csv")
+        return self.as_user(user or self.admin).post(
+            self.url, {"file": file}, format="multipart"
+        )
+
+    def test_fr010_admin_enrolls_students_from_csv(self):
+        response = self.upload(
+            "name,Email\nBulk 0,bulk0@example.com\nBulk 1, BULK1@example.com \n\n"
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["enrolled"], ["bulk0@example.com", "bulk1@example.com"]
+        )
+        self.assertEqual(
+            set(self.section.enrollments.values_list("student__email", flat=True)),
+            {"bulk0@example.com", "bulk1@example.com"},
+        )
+
+    def test_fr010_already_enrolled_students_are_skipped(self):
+        Enrollment.objects.create(section=self.section, student=self.more[0])
+
+        response = self.upload("email\nbulk0@example.com\nbulk2@example.com\n")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["enrolled"], ["bulk2@example.com"])
+        self.assertEqual(response.json()["already_enrolled"], ["bulk0@example.com"])
+        self.assertEqual(self.section.enrollments.count(), 2)
+
+    def test_fr010_invalid_rows_reject_whole_file(self):
+        response = self.upload(
+            "email\nbulk0@example.com\nfaculty@example.com\nnobody@example.com\n"
+            "bulk0@example.com\n"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        rows = [e["row"] for e in response.json()["errors"]]
+        self.assertEqual(rows, [3, 4, 5])
+        self.assertFalse(self.section.enrollments.exists())
+
+    def test_fr010_missing_email_header_or_empty_file_is_rejected(self):
+        no_header = self.upload("bulk0@example.com\nbulk1@example.com\n")
+        empty = self.upload("email\n")
+
+        self.assertEqual(no_header.status_code, 400)
+        self.assertEqual(empty.status_code, 400)
+        self.assertFalse(self.section.enrollments.exists())
+
+    def test_fr010_missing_file_and_non_utf8_are_rejected(self):
+        missing = self.as_user(self.admin).post(self.url, {}, format="multipart")
+        binary = self.as_user(self.admin).post(
+            self.url,
+            {"file": SimpleUploadedFile("s.csv", b"\xff\xfe\x00email", "text/csv")},
+            format="multipart",
+        )
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(binary.status_code, 400)
+
+    def test_fr010_inactive_section_rejects_upload(self):
+        self.section.is_active = False
+        self.section.save()
+
+        self.assertEqual(self.upload("email\nbulk0@example.com\n").status_code, 409)
+
+    def test_fr010_only_admins_can_upload(self):
+        with self.assertLogs("users.permissions", level="WARNING"):
+            response = self.upload("email\nbulk0@example.com\n", user=self.faculty)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.section.enrollments.exists())

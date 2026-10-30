@@ -1,5 +1,8 @@
 """Business rules for academic setup (SRS FR-006 to FR-013)."""
 
+import csv
+import io
+
 from django.db import IntegrityError, transaction
 
 from analytics.models import Course, Enrollment, Section
@@ -192,3 +195,86 @@ def sections_for_user(user):
     if user.role == User.Role.STUDENT:
         return queryset.filter(enrollments__student=user).order_by("course__code", "code")
     return queryset.none()
+
+
+MAX_CSV_BYTES = 1024 * 1024
+MAX_CSV_ROWS = 1000
+
+
+class CsvEnrollmentError(Exception):
+    """The upload is unusable or has invalid rows; nothing was enrolled."""
+
+    def __init__(self, errors):
+        super().__init__("CSV enrollment failed")
+        self.errors = errors
+
+
+def _read_csv_emails(upload):
+    if upload.size > MAX_CSV_BYTES:
+        raise CsvEnrollmentError([{"row": None, "error": "File is larger than 1 MB."}])
+    try:
+        text = upload.read().decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise CsvEnrollmentError(
+            [{"row": None, "error": "File must be UTF-8 encoded CSV."}]
+        ) from error
+    reader = csv.DictReader(io.StringIO(text))
+    headers = {(name or "").strip().lower(): name for name in reader.fieldnames or []}
+    if "email" not in headers:
+        raise CsvEnrollmentError(
+            [{"row": 1, "error": "The first row must be a header with an 'email' column."}]
+        )
+    rows = [
+        (number, (row.get(headers["email"]) or "").strip().lower())
+        for number, row in enumerate(reader, start=2)
+    ]
+    rows = [(number, email) for number, email in rows if email]
+    if not rows:
+        raise CsvEnrollmentError([{"row": None, "error": "The file has no student rows."}])
+    if len(rows) > MAX_CSV_ROWS:
+        raise CsvEnrollmentError(
+            [{"row": None, "error": f"At most {MAX_CSV_ROWS} rows per upload."}]
+        )
+    return rows
+
+
+def enroll_students_from_csv(*, section, upload):
+    """FR-010: enroll every student listed in a CSV with an 'email' column.
+
+    All-or-nothing: if any row is invalid nothing is enrolled and every bad
+    row is reported. Students already enrolled are skipped, not errors.
+    """
+    require_active_section(section)
+    rows = _read_csv_emails(upload)
+    students = {
+        user.email: user
+        for user in User.objects.filter(
+            email__in=[email for _, email in rows],
+            role=User.Role.STUDENT,
+            is_active=True,
+        )
+    }
+    errors, seen = [], set()
+    for number, email in rows:
+        if email in seen:
+            errors.append({"row": number, "email": email, "error": "Listed twice."})
+        elif email not in students:
+            errors.append(
+                {"row": number, "email": email, "error": "No active student with this email."}
+            )
+        seen.add(email)
+    if errors:
+        raise CsvEnrollmentError(errors)
+
+    already = set(
+        Enrollment.objects.filter(
+            section=section, student__in=students.values()
+        ).values_list("student__email", flat=True)
+    )
+    new = [students[email] for _, email in rows if email not in already]
+    with transaction.atomic():
+        Enrollment.objects.bulk_create(
+            [Enrollment(section=section, student=student) for student in new],
+            ignore_conflicts=True,
+        )
+    return {"enrolled": [s.email for s in new], "already_enrolled": sorted(already)}

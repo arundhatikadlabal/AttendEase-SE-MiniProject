@@ -85,3 +85,7 @@ def course_data(course):
         "is_active": course.is_active,
         "sections": [section_data(section) for section in course.sections.all()],
     }
+
+
+class CsvEnrollmentSerializer(serializers.Serializer):
+    file = serializers.FileField()
