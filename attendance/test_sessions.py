@@ -290,3 +290,83 @@ class RosterTests(SessionTestCase):
             )
 
         self.assertEqual(response.json()["total"], 22)
+
+
+class MarkStudentTests(SessionTestCase):
+    """FR-016: faculty mark each student present or absent."""
+
+    def mark(self, session, student, status, user=None):
+        return self.as_user(user or self.faculty).put(
+            reverse("attendance-student-mark", args=[session.pk, student.pk]),
+            {"status": status},
+            format="json",
+        )
+
+    def test_fr016_faculty_marks_each_student_present_or_absent(self):
+        session = self.open_session()
+
+        present = self.mark(session, self.students[0], "present")
+        absent = self.mark(session, self.students[1], "absent")
+
+        self.assertEqual(present.status_code, 200)
+        self.assertEqual(present.json()["status"], "present")
+        self.assertEqual(absent.json()["status"], "absent")
+        self.assertEqual(
+            dict(session.records.values_list("student_id", "status")),
+            {self.students[0].pk: "PRESENT", self.students[1].pk: "ABSENT"},
+        )
+
+    def test_fr016_toggling_updates_the_same_record(self):
+        session = self.open_session()
+        self.mark(session, self.students[0], "present")
+
+        response = self.mark(session, self.students[0], "absent")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(session.records.count(), 1)
+        self.assertEqual(session.records.get().status, "ABSENT")
+
+    def test_fr016_roster_reflects_marks(self):
+        session = self.open_session()
+        self.mark(session, self.students[1], "present")
+
+        roster = self.client.get(reverse("attendance-session-roster", args=[session.pk]))
+
+        statuses = {s["student_id"]: s["status"] for s in roster.json()["students"]}
+        self.assertEqual(statuses[self.students[1].pk], "present")
+        self.assertIsNone(statuses[self.students[0].pk])
+
+    def test_fr016_invalid_status_is_rejected(self):
+        session = self.open_session()
+
+        self.assertEqual(self.mark(session, self.students[0], "late").status_code, 400)
+        self.assertFalse(session.records.exists())
+
+    def test_fr016_unenrolled_student_returns_404(self):
+        session = self.open_session()
+
+        response = self.mark(session, self.students[2], "present")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(session.records.exists())
+
+    def test_fr016_closed_session_cannot_be_marked(self):
+        session = self.open_session()
+        session.closed = True
+        session.save()
+
+        response = self.mark(session, self.students[0], "present")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("session", response.json())
+
+    def test_fr016_only_assigned_faculty_can_mark(self):
+        session = self.open_session()
+
+        other = self.mark(session, self.students[0], "present", self.other_faculty)
+        with self.assertLogs("users.permissions", level="WARNING"):
+            admin = self.mark(session, self.students[0], "present", self.admin)
+
+        self.assertEqual(other.status_code, 403)
+        self.assertEqual(admin.status_code, 403)
+        self.assertFalse(session.records.exists())
