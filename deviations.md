@@ -96,3 +96,15 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Why:** A toggle that couldn't be undone would make a mis-click permanent before the session is even closed.
 
 **Introduced in:** `feature/fr-016-mark-student`.
+
+### D-09: Performance is measured in the automated test suite (NFR-001, NFR-002 / TC-11)
+
+**Documents:** NFR-001 requires that 95% of API requests complete within 2 seconds with up to 50 concurrent users. NFR-002 requires the roster to load within 3 seconds for a section of up to 80 students. TC-11 says to simulate 50 concurrent users loading the roster for an 80-student section.
+
+**Implementation:** `attendance/test_performance.py` runs on every CI build:
+- **NFR-002:** with a real JWT login, the 80-student roster and "mark all present" each finish within 3 seconds. The roster also uses a fixed number of database queries (3) whatever the class size.
+- **TC-11 / NFR-001:** 50 threads request the 80-student roster at the same time, and the 95th-percentile response time must be under 2 seconds. A second run mixes five read endpoints under the same load. A local run measured a median of 0.21 s and a 95th percentile of 0.37 s.
+
+**Difference from a production load test:** these tests call the app in-process against the SQLite test database. They don't go over a network to the PostgreSQL deployment from `docker-compose`, so they guard against regressions rather than certify production capacity. A load test against the deployed stack, for example with Locust, would be the full TC-11 measurement if evaluators require it.
+
+**Introduced in:** `feature/nfr-002-roster-performance` and `feature/nfr-001-concurrent-load`.
