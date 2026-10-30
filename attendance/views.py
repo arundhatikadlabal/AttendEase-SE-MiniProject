@@ -109,3 +109,14 @@ class MarkAllPresentView(APIView):
         services.mark_all_present(faculty=request.user, session_id=session_id)
         session = services.get_session_for_user(request.user, session_id)
         return Response(roster_data(session, services.session_roster(session)))
+
+
+class SessionCloseView(APIView):
+    """FR-018: faculty close (finalize) a session after marking."""
+
+    allowed_roles = (User.Role.FACULTY,)
+
+    def post(self, request, session_id):
+        services.close_session(faculty=request.user, session_id=session_id)
+        session = services.get_session_for_user(request.user, session_id)
+        return Response(roster_data(session, services.session_roster(session)))
