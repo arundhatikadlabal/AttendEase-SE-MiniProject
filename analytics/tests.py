@@ -346,6 +346,93 @@ class DefaulterReportApiTests(TestCase):
             ["Other Section Student"],
         )
 
+    def test_date_filters_change_defaulter_calculations(self):
+        Enrollment.objects.filter(section=self.section).exclude(
+            student=self.below
+        ).delete()
+        sessions = self.create_sessions(self.section, total=4)
+        for index, session in enumerate(sessions):
+            AttendanceRecord.objects.create(
+                session=session,
+                student=self.below,
+                status=(
+                    AttendanceRecord.Status.PRESENT
+                    if index in (0, 3)
+                    else AttendanceRecord.Status.ABSENT
+                ),
+            )
+
+        full_range = self.report_as(self.faculty)
+        start_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "start_date": "2026-01-04"},
+        )
+        end_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "end_date": "2026-01-03"},
+        )
+        combined = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-01-02",
+                "end_date": "2026-01-03",
+            },
+        )
+
+        self.assertEqual(full_range.status_code, 200)
+        self.assertEqual(full_range.json()["students"][0]["attendance_percentage"], "50.00")
+        self.assertEqual(start_filtered.status_code, 200)
+        self.assertEqual(start_filtered.json()["students"], [])
+        self.assertEqual(end_filtered.status_code, 200)
+        self.assertEqual(
+            end_filtered.json()["students"][0]["attendance_percentage"], "33.33"
+        )
+        self.assertEqual(combined.status_code, 200)
+        self.assertEqual(
+            combined.json()["students"][0]["attendance_percentage"], "0.00"
+        )
+
+        self.course.shortage_threshold = Decimal("0.00")
+        self.course.save(update_fields=["shortage_threshold"])
+        no_matches = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-01-10",
+                "end_date": "2026-01-11",
+            },
+        )
+        self.assertEqual(no_matches.status_code, 200)
+        self.assertEqual(no_matches.json()["students"], [])
+
+    def test_invalid_date_formats_and_reversed_ranges_are_rejected_on_reports(self):
+        self.client.force_authenticate(user=self.faculty)
+        urls = (self.url, reverse("analytics-summary"))
+
+        for url in urls:
+            with self.subTest(url=url):
+                invalid = self.client.get(
+                    url,
+                    {"section_id": self.section.pk, "start_date": "not-a-date"},
+                )
+                reversed_range = self.client.get(
+                    url,
+                    {
+                        "section_id": self.section.pk,
+                        "start_date": "2026-10-02",
+                        "end_date": "2026-10-01",
+                    },
+                )
+                invalid_calendar_date = self.client.get(
+                    url,
+                    {"section_id": self.section.pk, "end_date": "2026-02-30"},
+                )
+
+                self.assertEqual(invalid.status_code, 400)
+                self.assertEqual(reversed_range.status_code, 400)
+                self.assertEqual(invalid_calendar_date.status_code, 400)
+
     def test_missing_malformed_and_unknown_section_ids_are_rejected(self):
         self.client.force_authenticate(user=self.faculty)
 
@@ -560,12 +647,71 @@ class SectionAttendanceSummaryTests(TestCase):
             [date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
         )
 
-        response = self.report_as(self.faculty)
+        self.client.force_authenticate(user=self.faculty)
+        response = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-01",
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["total_sessions"], 1)
         self.assertEqual(response.json()["date_range"]["start_date"], "2026-09-01")
         self.assertEqual(response.json()["average_attendance_percentage"], "0.00")
+
+    def test_date_filters_apply_before_summary_calculations(self):
+        sessions = self.create_sessions(
+            self.section,
+            [date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
+        )
+        for student in self.students:
+            self.mark_present(sessions, student, 1)
+
+        full_range = self.report_as(self.faculty)
+        start_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "start_date": "2026-09-02"},
+        )
+        end_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "end_date": "2026-09-01"},
+        )
+        combined = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-02",
+                "end_date": "2026-09-03",
+            },
+        )
+        no_matches = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-10",
+                "end_date": "2026-09-11",
+            },
+        )
+
+        self.assertEqual(full_range.status_code, 200)
+        self.assertEqual(full_range.json()["total_sessions"], 4)
+        self.assertEqual(full_range.json()["average_attendance_percentage"], "25.00")
+        self.assertEqual(start_filtered.json()["total_sessions"], 3)
+        self.assertEqual(start_filtered.json()["date_range"]["start_date"], "2026-09-02")
+        self.assertEqual(start_filtered.json()["average_attendance_percentage"], "0.00")
+        self.assertEqual(end_filtered.json()["total_sessions"], 1)
+        self.assertEqual(end_filtered.json()["average_attendance_percentage"], "100.00")
+        self.assertEqual(combined.json()["total_sessions"], 2)
+        self.assertEqual(combined.json()["average_attendance_percentage"], "0.00")
+        self.assertEqual(no_matches.status_code, 200)
+        self.assertEqual(no_matches.json()["total_sessions"], 0)
+        self.assertEqual(
+            no_matches.json()["date_range"],
+            {"start_date": None, "end_date": None},
+        )
 
     def test_missing_malformed_and_unknown_section_ids_are_rejected(self):
         self.client.force_authenticate(user=self.faculty)
