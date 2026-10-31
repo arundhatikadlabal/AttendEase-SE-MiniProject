@@ -1,7 +1,12 @@
 from django.urls import path
 
-from .views import CorrectionSubmissionView
+from .views import CorrectionDecisionView, CorrectionSubmissionView
 
 urlpatterns = [
-    path("", CorrectionSubmissionView.as_view(), name="correction-submit"),
+    path(
+        "corrections/<int:correction_id>",
+        CorrectionDecisionView.as_view(),
+        name="correction-decision",
+    ),
+    path("corrections", CorrectionSubmissionView.as_view(), name="correction-submit"),
 ]
