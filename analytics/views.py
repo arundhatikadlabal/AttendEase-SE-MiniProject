@@ -5,7 +5,11 @@ from rest_framework.views import APIView
 from users.models import User
 
 from . import services
-from .serializers import DefaulterReportEntrySerializer, DefaulterReportQuerySerializer
+from .serializers import (
+    DefaulterReportEntrySerializer,
+    SectionAttendanceSummarySerializer,
+    SectionReportQuerySerializer,
+)
 
 
 class DefaulterReportView(APIView):
@@ -14,7 +18,7 @@ class DefaulterReportView(APIView):
     allowed_roles = (User.Role.FACULTY, User.Role.ADMIN)
 
     def get(self, request):
-        query = DefaulterReportQuerySerializer(data=request.query_params)
+        query = SectionReportQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         section, entries = services.section_defaulters(
             section_id=query.validated_data["section_id"],
@@ -33,3 +37,18 @@ class DefaulterReportView(APIView):
                 ).data,
             }
         )
+
+
+class SectionAttendanceSummaryView(APIView):
+    """FR-032: summarize closed-session attendance for a section."""
+
+    allowed_roles = (User.Role.FACULTY, User.Role.ADMIN)
+
+    def get(self, request):
+        query = SectionReportQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        summary = services.section_attendance_summary(
+            section_id=query.validated_data["section_id"],
+            user=request.user,
+        )
+        return Response(SectionAttendanceSummarySerializer(instance=summary).data)
