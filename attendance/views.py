@@ -18,6 +18,15 @@ from .services import submit_records
 FACULTY_OR_ADMIN = (User.Role.FACULTY, User.Role.ADMIN)
 
 
+class StudentDashboardView(APIView):
+    """FR-020: show the student's attendance for each enrolled course."""
+
+    allowed_roles = (User.Role.STUDENT,)
+
+    def get(self, request):
+        return Response({"courses": services.student_dashboard_courses(request.user)})
+
+
 class AttendanceRecordsView(APIView):
     """Submit records for an existing open session; duplicates return 409."""
 
