@@ -1,5 +1,8 @@
 """Attendance sessions and records over the shared analytics models (FR-014 to FR-019, FR-037)."""
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
@@ -155,7 +158,9 @@ def start_session(*, faculty, timetable_slot, date):
                 )
             }
         )
-    if AttendanceSession.objects.filter(timetable_slot=timetable_slot, date=date).exists():
+    if AttendanceSession.objects.filter(
+        timetable_slot=timetable_slot, date=date
+    ).exists():
         raise SessionConflict()
     try:
         with transaction.atomic():
@@ -281,3 +286,44 @@ def close_session(*, faculty, session_id):
         session.closed_at = timezone.now()
         session.save(update_fields=["closed", "closed_at"])
         return session
+
+
+def edit_closed_record(*, faculty, session_id, student_id, status):
+    """FR-038: edit an existing mark before the session's edit deadline."""
+    if status not in ("present", "absent"):
+        raise ValidationError({"status": "Choose present or absent."})
+    with transaction.atomic():
+        # Use the same session-first lock as marking and closure. Check the
+        # clock after acquiring the lock so waiting cannot extend the window.
+        session = get_object_or_404(
+            AttendanceSession.objects.select_for_update(), pk=session_id
+        )
+        _require_assigned_faculty(faculty, session.section)
+        if not session.closed:
+            raise ValidationError(
+                {"session": "Use normal marking while the session is open."}
+            )
+        reject_future_date(session.date, field="session")
+        if session.closed_at is None:
+            raise ValidationError(
+                {"session": "This session has no recorded closure time."}
+            )
+        now = timezone.now()
+        seconds = settings.ATTENDANCE_EDIT_WINDOW_SECONDS
+        if session.closed_at > now:
+            raise ValidationError(
+                {"session": "This session's closure time is in the future."}
+            )
+        if seconds <= 0 or now >= session.closed_at + timedelta(seconds=seconds):
+            raise PermissionDenied(
+                "The attendance edit window has expired or is disabled."
+            )
+
+        record = get_object_or_404(
+            AttendanceRecord.objects.select_for_update(),
+            session=session,
+            student_id=student_id,
+        )
+        record.status = status.upper()
+        record.save(update_fields=["status"])
+        return record
