@@ -27,6 +27,15 @@ class StudentDashboardView(APIView):
         return Response({"courses": services.student_dashboard_courses(request.user)})
 
 
+class StudentHistoryView(APIView):
+    """FR-021: finalized session-by-session attendance for a student."""
+
+    allowed_roles = (User.Role.STUDENT,)
+
+    def get(self, request):
+        return Response({"history": services.student_session_history(request.user)})
+
+
 class AttendanceRecordsView(APIView):
     """Submit records for an existing open session; duplicates return 409."""
 

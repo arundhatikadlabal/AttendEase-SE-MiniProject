@@ -73,3 +73,24 @@ class StudentDashboardTests(TestCase):
         self.assertEqual(self.client.get(self.url).status_code, 403)
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_tc06_session_history_is_closed_and_student_scoped(self):
+        AttendanceRecord.objects.create(
+            session=self.closed_absent,
+            student=self.other_student,
+            status=AttendanceRecord.Status.PRESENT,
+        )
+        response = self.client.get(reverse("student-history"))
+        self.assertEqual(response.status_code, 200)
+        history = response.data["history"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual([item["date"] for item in history], ["2026-10-02", "2026-10-01"])
+        self.assertEqual([item["status"] for item in history], ["absent", "present"])
+        self.assertTrue(all(item["course_code"] == "CS101" for item in history))
+        self.assertTrue(all(item["section_code"] == "A" for item in history))
+
+    def test_history_requires_student_authentication(self):
+        self.client.force_authenticate(self.faculty)
+        self.assertEqual(self.client.get(reverse("student-history")).status_code, 403)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(reverse("student-history")).status_code, 401)
