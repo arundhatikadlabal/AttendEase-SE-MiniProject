@@ -142,3 +142,15 @@ class StudentDashboardTests(TestCase):
         ):
             with self.subTest(query=query):
                 self.assertEqual(self.client.get(url, query).status_code, 400)
+
+    def test_nfr007_student_portal_is_responsive_and_links_to_protected_apis(self):
+        self.client.force_authenticate(None)
+        response = self.client.get(reverse("student-portal"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('name="viewport"', content)
+        self.assertIn("bootstrap@5", content)
+        self.assertIn(reverse("student-dashboard"), content)
+        self.assertIn(reverse("student-history"), content)
+        self.assertIn('id="date-filter"', content)
+        self.assertIn("student_portal.js", content)
