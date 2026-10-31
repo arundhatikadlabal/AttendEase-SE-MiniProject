@@ -10,6 +10,9 @@ jobs:
   lint-and-test:
     name: Lint and test
     runs-on: ubuntu-latest
+    env:
+      SERVICE_COVERAGE_INCLUDE: >-
+        users/services.py,users/security.py,academic/services.py,attendance/services.py,corrections/services.py,corrections/notifications.py,analytics/services.py
 
     steps:
       - name: Check out repository
@@ -31,5 +34,25 @@ jobs:
       - name: Run Django system checks
         run: python manage.py check
 
-      - name: Run automated tests
-        run: python manage.py test
+      - name: Run automated tests with coverage
+        run: python -m coverage run --source=users,academic,attendance,corrections,analytics manage.py test
+
+      - name: Generate service-layer coverage reports
+        run: |
+          python -m coverage report --include="$SERVICE_COVERAGE_INCLUDE"
+          python -m coverage html --include="$SERVICE_COVERAGE_INCLUDE" --directory=htmlcov
+          python -m coverage json --include="$SERVICE_COVERAGE_INCLUDE" --pretty-print -o service-coverage.json
+
+      - name: Enforce 70% service-layer coverage
+        run: python -m coverage report --include="$SERVICE_COVERAGE_INCLUDE" --fail-under=70
+
+      - name: Retain service-layer coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: service-layer-coverage
+          path: |
+            htmlcov/
+            service-coverage.json
+          if-no-files-found: ignore
+          retention-days: 30
