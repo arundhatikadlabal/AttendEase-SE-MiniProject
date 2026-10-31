@@ -2,6 +2,7 @@
 Django==4.2.30
 djangorestframework==3.17.2
 djangorestframework-simplejwt==5.5.1
+reportlab==5.1.0
 ruff==0.17.1
 sqlparse==0.6.0
 coverage

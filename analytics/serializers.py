@@ -5,6 +5,11 @@ class SectionReportQuerySerializer(serializers.Serializer):
     section_id = serializers.IntegerField(min_value=1)
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
+    export_format = serializers.ChoiceField(
+        choices=("json", "csv", "pdf"),
+        required=False,
+        default="json",
+    )
 
     def validate(self, attrs):
         start_date = attrs.get("start_date")

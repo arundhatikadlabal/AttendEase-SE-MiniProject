@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from users.models import User
 
 from . import services
+from .exports import report_export_response
 from .serializers import (
     DefaulterReportEntrySerializer,
     SectionAttendanceSummarySerializer,
@@ -26,19 +27,18 @@ class DefaulterReportView(APIView):
             start_date=query.validated_data.get("start_date"),
             end_date=query.validated_data.get("end_date"),
         )
-        return Response(
-            {
-                "section": {
-                    "id": section.pk,
-                    "code": section.code,
-                    "course": section.course.code,
-                },
-                "students": DefaulterReportEntrySerializer(
-                    instance=entries,
-                    many=True,
-                ).data,
-            }
-        )
+        report = {
+            "section": {
+                "id": section.pk,
+                "code": section.code,
+                "course": section.course.code,
+            },
+            "students": DefaulterReportEntrySerializer(
+                instance=entries,
+                many=True,
+            ).data,
+        }
+        return _report_response(report, "defaulters", query.validated_data)
 
 
 class SectionAttendanceSummaryView(APIView):
@@ -55,4 +55,16 @@ class SectionAttendanceSummaryView(APIView):
             start_date=query.validated_data.get("start_date"),
             end_date=query.validated_data.get("end_date"),
         )
-        return Response(SectionAttendanceSummarySerializer(instance=summary).data)
+        report = SectionAttendanceSummarySerializer(instance=summary).data
+        return _report_response(report, "summary", query.validated_data)
+
+
+def _report_response(report, report_type, query):
+    export_format = query["export_format"]
+    if export_format == "json":
+        return Response(report)
+    return report_export_response(
+        report,
+        report_type=report_type,
+        export_format=export_format,
+    )
