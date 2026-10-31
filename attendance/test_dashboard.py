@@ -68,6 +68,16 @@ class StudentDashboardTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual([item["course_code"] for item in response.data["courses"]], ["CS101"])
 
+    def test_fr022_flags_courses_below_their_own_threshold(self):
+        course = self.client.get(self.url).data["courses"][0]
+        self.assertEqual(str(course["threshold"]), "75.00")
+        self.assertTrue(course["below_threshold"])
+
+        self.course.shortage_threshold = 40
+        self.course.save(update_fields=["shortage_threshold"])
+        course = self.client.get(self.url).data["courses"][0]
+        self.assertFalse(course["below_threshold"])
+
     def test_dashboard_is_student_only(self):
         self.client.force_authenticate(self.faculty)
         self.assertEqual(self.client.get(self.url).status_code, 403)
