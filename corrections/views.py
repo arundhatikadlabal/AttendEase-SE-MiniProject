@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from users.models import User
 
 from .serializers import (
-    CorrectionApprovalSerializer,
+    CorrectionDecisionSerializer,
     CorrectionSubmissionSerializer,
     correction_data,
     pending_correction_data,
@@ -14,6 +14,7 @@ from .serializers import (
 from .services import (
     approve_correction,
     pending_corrections_for_faculty,
+    reject_correction,
     submit_correction,
 )
 
@@ -47,14 +48,21 @@ class CorrectionSubmissionView(APIView):
 
 
 class CorrectionDecisionView(APIView):
-    """FR-027: the section's assigned faculty may approve a pending request."""
+    """FR-027 / FR-028: assigned faculty approve or reject a pending request."""
 
     allowed_roles = (User.Role.FACULTY,)
 
     def patch(self, request, correction_id):
-        serializer = CorrectionApprovalSerializer(data=request.data)
+        serializer = CorrectionDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        correction = approve_correction(
-            faculty=request.user, correction_id=correction_id
-        )
+        if serializer.validated_data["action"] == "approve":
+            correction = approve_correction(
+                faculty=request.user, correction_id=correction_id
+            )
+        else:
+            correction = reject_correction(
+                faculty=request.user,
+                correction_id=correction_id,
+                reason=serializer.validated_data["reason"],
+            )
         return Response(correction_data(correction), status=status.HTTP_200_OK)

@@ -14,6 +14,7 @@ def correction_data(correction):
         "record_id": correction.record_id,
         "student_id": correction.student_id,
         "reason": correction.reason,
+        "rejection_reason": correction.rejection_reason,
         "status": correction.status,
         "created_at": correction.created_at.isoformat(),
         "acted_by": correction.acted_by_id,
@@ -39,5 +40,15 @@ def pending_correction_data(correction):
     return data
 
 
-class CorrectionApprovalSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=("approve",))
+class CorrectionDecisionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=("approve", "reject"))
+    reason = serializers.CharField(
+        max_length=2000, allow_blank=False, trim_whitespace=True, required=False
+    )
+
+    def validate(self, attrs):
+        if attrs["action"] == "reject" and not attrs.get("reason"):
+            raise serializers.ValidationError(
+                {"reason": "A rejection reason is required."}
+            )
+        return attrs
