@@ -35,6 +35,7 @@ class User(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=150)
+    usn = models.CharField(max_length=50, blank=True, null=True)
     role = models.CharField(max_length=10, choices=Role.choices)
     token_version = models.PositiveIntegerField(default=0)
 

@@ -28,7 +28,13 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         return Response(
-            {"id": user.pk, "name": user.name, "email": user.email, "role": user.role},
+            {
+                "id": user.pk,
+                "name": user.name,
+                "email": user.email,
+                "usn": user.usn,
+                "role": user.role,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -157,5 +163,11 @@ class MeView(APIView):
     def get(self, request):
         user = request.user
         return Response(
-            {"id": user.pk, "name": user.name, "email": user.email, "role": user.role}
+            {
+                "id": user.pk,
+                "name": user.name,
+                "email": user.email,
+                "usn": user.usn,
+                "role": user.role,
+            }
         )

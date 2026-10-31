@@ -71,7 +71,7 @@ def valid_password_reset_token(*, uid, token):
     return reset_tokens.check_token(user, token)
 
 
-def register_user(*, name, email, password, role):
+def register_user(*, name, email, password, role, usn=None):
     """Create a student or faculty account with a hashed password."""
     if role not in (User.Role.STUDENT, User.Role.FACULTY):
         raise ValueError("Public registration cannot create administrators")
@@ -80,4 +80,5 @@ def register_user(*, name, email, password, role):
         email=email,
         password=password,
         role=role,
+        usn=usn,
     )

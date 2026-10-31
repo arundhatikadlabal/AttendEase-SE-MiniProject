@@ -1,7 +1,11 @@
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from .models import AttendanceRecord, AttendanceSession, Enrollment
+from rest_framework.exceptions import NotFound, PermissionDenied
+
+from users.models import User
+
+from .models import AttendanceRecord, AttendanceSession, Enrollment, Section
 
 
 def calculate_attendance_percentage(student, course):
@@ -39,7 +43,7 @@ def calculate_attendance_percentage(student, course):
     )
 
 
-def identify_students_below_threshold(course):
+def identify_students_below_threshold(course, section=None):
     """
     Return enrolled students whose attendance is below the course threshold.
 
@@ -50,7 +54,15 @@ def identify_students_below_threshold(course):
 
     enrollments = Enrollment.objects.filter(
         section__course=course,
-    ).select_related("student").distinct()
+        student__role=User.Role.STUDENT,
+    )
+    if section is not None:
+        enrollments = enrollments.filter(section=section)
+    enrollments = (
+        enrollments.select_related("student")
+        .order_by("student__name", "student__email")
+        .distinct()
+    )
 
     for enrollment in enrollments:
         student = enrollment.student
@@ -66,3 +78,34 @@ def identify_students_below_threshold(course):
             )
 
     return results
+
+
+def section_defaulters(*, section_id, user):
+    """Return enrolled students below this section's course threshold (FR-031)."""
+    section = (
+        Section.objects.select_related("course")
+        .filter(pk=section_id)
+        .first()
+    )
+    if section is None:
+        raise NotFound("Section not found.")
+
+    if user.role != User.Role.ADMIN and (
+        user.role != User.Role.FACULTY or section.faculty_id != user.pk
+    ):
+        raise PermissionDenied("You are not assigned to this section.")
+
+    defaulters = identify_students_below_threshold(section.course, section=section)
+    results = [
+        {
+            "student_name": defaulter["student"].name,
+            "usn": defaulter["student"].usn,
+            "course": section.course.code,
+            "attendance_percentage": defaulter["attendance_percentage"],
+            "threshold": defaulter["threshold"],
+            "status": "Defaulter",
+        }
+        for defaulter in defaulters
+    ]
+
+    return section, results
