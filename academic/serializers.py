@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from analytics.models import Section
@@ -16,6 +18,13 @@ def _active_users(role, label):
 class CourseSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=20)
     title = serializers.CharField(max_length=200)
+    shortage_threshold = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        max_value=Decimal("100.00"),
+        required=False,
+    )
 
 
 class SectionSerializer(serializers.Serializer):
@@ -82,6 +91,7 @@ def course_data(course):
         "id": course.pk,
         "code": course.code,
         "title": course.title,
+        "shortage_threshold": course.shortage_threshold,
         "is_active": course.is_active,
         "sections": [section_data(section) for section in course.sections.all()],
     }
