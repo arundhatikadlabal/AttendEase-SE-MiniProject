@@ -108,3 +108,16 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Difference from a production load test:** these tests call the app in-process against the SQLite test database. They don't go over a network to the PostgreSQL deployment from `docker-compose`, so they guard against regressions rather than certify production capacity. A load test against the deployed stack, for example with Locust, would be the full TC-11 measurement if evaluators require it.
 
 **Introduced in:** `feature/nfr-002-roster-performance` and `feature/nfr-001-concurrent-load`.
+
+
+## Attendance corrections (Role 3 — Anshdeep Singh Sachdeva)
+
+### D-10: Direct attendance edits default to 24 hours after closure (FR-038)
+
+**Documents:** FR-038 requires a configurable edit window after session closure. SAD §4.6 leaves its duration and whether it is per-course undecided.
+
+**Implementation:** `ATTENDANCE_EDIT_WINDOW_SECONDS` is a deployment-wide environment setting, defaulting to 86400 seconds (24 hours); zero disables direct edits. The assigned active faculty member may `PATCH /api/attendance/sessions/{id}/records/{student_id}` with `{"status": "present"|"absent"}` to update an existing record. Edits are allowed from `closed_at` up to, but excluding, `closed_at + window`. Missing or future closure timestamps are rejected instead of guessing a deadline. An edit never reopens the session or changes `closed_at`. The open-session `PUT` and duplicate-protected batch `POST` retain their existing behavior.
+
+**Why:** A configurable deployment default supports a working demo without adding a per-course policy or an administration interface not defined in the documents. Legacy closed sessions without a closure timestamp cannot safely establish eligibility. Approval of a student correction remains the separate FR-027 workflow.
+
+**Introduced in:** `feature/fr-038-attendance-edit-window`.
