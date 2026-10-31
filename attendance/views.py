@@ -1,4 +1,5 @@
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -131,3 +132,35 @@ class SessionCloseView(APIView):
         services.close_session(faculty=request.user, session_id=session_id)
         session = services.get_session_for_user(request.user, session_id)
         return Response(roster_data(session, services.session_roster(session)))
+
+
+class AttendanceHistoryView(APIView):
+    """NFR-003: read-only history, restricted to the record's authorized users."""
+
+    allowed_roles = (User.Role.STUDENT, User.Role.FACULTY, User.Role.ADMIN)
+
+    def get(self, request, session_id, student_id):
+        from .audit import history_for_user
+
+        history = history_for_user(
+            user=request.user, session_id=session_id, student_id=student_id
+        )
+        paginator = PageNumberPagination()
+        paginator.page_size = 25
+        entries = paginator.paginate_queryset(history, request, view=self)
+        return paginator.get_paginated_response(
+            [
+                {
+                    "id": entry.pk,
+                    "record_id": entry.record_id,
+                    "action": entry.action,
+                    "old_status": entry.old_status,
+                    "new_status": entry.new_status,
+                    "actor_id": entry.actor_id,
+                    "correction_id": entry.correction_id,
+                    "reason": entry.reason,
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in entries
+            ]
+        )

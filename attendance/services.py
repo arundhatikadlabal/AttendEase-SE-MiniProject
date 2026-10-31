@@ -17,6 +17,9 @@ from rest_framework.exceptions import (
 from analytics.models import AttendanceRecord, AttendanceSession, Enrollment
 from users.models import User
 
+from .audit import append_change
+from .models import AttendanceAuditEntry
+
 
 class DuplicateAttendance(APIException):
     status_code = 409
@@ -72,7 +75,7 @@ def submit_records(*, faculty, session_id, records):
         try:
             # Inner savepoint lets us inspect a constraint conflict safely.
             with transaction.atomic():
-                return AttendanceRecord.objects.bulk_create(
+                saved = AttendanceRecord.objects.bulk_create(
                     [
                         AttendanceRecord(
                             session=session,
@@ -82,6 +85,19 @@ def submit_records(*, faculty, session_id, records):
                         for record in records
                     ]
                 )
+                AttendanceAuditEntry.objects.bulk_create(
+                    [
+                        AttendanceAuditEntry(
+                            record=record,
+                            actor=faculty,
+                            action="CREATED",
+                            old_status="",
+                            new_status=record.status,
+                        )
+                        for record in saved
+                    ]
+                )
+                return saved
         except IntegrityError as error:
             if existing.exists():
                 raise DuplicateAttendance() from error
@@ -219,11 +235,24 @@ def mark_student(*, faculty, session_id, student_id, status):
         ).exists()
         if not enrolled:
             raise NotFound("This student is not enrolled in this section.")
-        record, _ = AttendanceRecord.objects.update_or_create(
-            session=session,
-            student_id=student_id,
-            defaults={"status": status.upper()},
+        record = (
+            AttendanceRecord.objects.select_for_update()
+            .filter(session=session, student_id=student_id)
+            .first()
         )
+        old_status = record.status if record else ""
+        action = "MARKED" if record else "CREATED"
+        if record is None:
+            record = AttendanceRecord.objects.create(
+                session=session, student_id=student_id, status=status.upper()
+            )
+        elif record.status != status.upper():
+            record.status = status.upper()
+            record.save(update_fields=["status"])
+        if old_status != record.status:
+            append_change(
+                record=record, actor=faculty, action=action, old_status=old_status
+            )
         return record
 
 
@@ -238,27 +267,51 @@ def mark_all_present(*, faculty, session_id):
                 student__is_active=True,
             ).values_list("student_id", flat=True)
         )
-        AttendanceRecord.objects.filter(
-            session=session, student_id__in=student_ids
-        ).exclude(status=AttendanceRecord.Status.PRESENT).update(
-            status=AttendanceRecord.Status.PRESENT
-        )
-        already = set(
-            AttendanceRecord.objects.filter(
-                session=session, student_id__in=student_ids
-            ).values_list("student_id", flat=True)
-        )
-        AttendanceRecord.objects.bulk_create(
+        # Lock existing records as well as the session to serialize with decisions.
+        existing = {
+            record.student_id: record
+            for record in AttendanceRecord.objects.select_for_update()
+            .filter(session=session, student_id__in=student_ids)
+            .order_by("pk")
+        }
+        changed = [
+            record
+            for record in existing.values()
+            if record.status != AttendanceRecord.Status.PRESENT
+        ]
+        events = [
+            AttendanceAuditEntry(
+                record=record,
+                actor=faculty,
+                action="MARKED",
+                old_status=record.status,
+                new_status="PRESENT",
+            )
+            for record in changed
+        ]
+        for record in changed:
+            record.status = AttendanceRecord.Status.PRESENT
+        AttendanceRecord.objects.bulk_update(changed, ["status"])
+        created = AttendanceRecord.objects.bulk_create(
             [
                 AttendanceRecord(
-                    session=session,
-                    student_id=student_id,
-                    status=AttendanceRecord.Status.PRESENT,
+                    session=session, student_id=student_id, status="PRESENT"
                 )
                 for student_id in student_ids
-                if student_id not in already
+                if student_id not in existing
             ]
         )
+        events.extend(
+            AttendanceAuditEntry(
+                record=record,
+                actor=faculty,
+                action="CREATED",
+                old_status="",
+                new_status="PRESENT",
+            )
+            for record in created
+        )
+        AttendanceAuditEntry.objects.bulk_create(events)
         return session
 
 
@@ -324,6 +377,11 @@ def edit_closed_record(*, faculty, session_id, student_id, status):
             session=session,
             student_id=student_id,
         )
-        record.status = status.upper()
-        record.save(update_fields=["status"])
+        old_status = record.status
+        if old_status != status.upper():
+            record.status = status.upper()
+            record.save(update_fields=["status"])
+            append_change(
+                record=record, actor=faculty, action="EDITED", old_status=old_status
+            )
         return record
