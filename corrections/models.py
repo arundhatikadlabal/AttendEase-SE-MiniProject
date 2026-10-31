@@ -19,6 +19,7 @@ class CorrectionRequest(models.Model):
         related_name="correction_requests",
     )
     reason = models.TextField(max_length=2000)
+    rejection_reason = models.TextField(max_length=2000, blank=True, default="")
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.PENDING
     )
