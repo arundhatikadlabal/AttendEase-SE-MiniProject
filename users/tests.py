@@ -175,7 +175,16 @@ class RoleAccessTests(TestCase):
         authorized = self.client.get(reverse("me"), HTTP_AUTHORIZATION=f"Bearer {token}")
 
         self.assertEqual(authorized.status_code, 200)
-        self.assertEqual(authorized.json()["role"], "student")
+        self.assertEqual(
+            authorized.json(),
+            {
+                "id": get_user_model().objects.get(email="student@example.com").pk,
+                "name": "Student",
+                "email": "student@example.com",
+                "usn": None,
+                "role": "student",
+            },
+        )
 
 
 class LogoutTests(TestCase):

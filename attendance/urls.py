@@ -8,10 +8,16 @@ from .views import (
     SessionListView,
     SessionRosterView,
     SessionStartView,
+    StudentDashboardView,
+    StudentHistoryView,
     StudentMarkView,
+    StudentPortalView,
 )
 
 urlpatterns = [
+    path("dashboard", StudentDashboardView.as_view(), name="student-dashboard"),
+    path("dashboard/history", StudentHistoryView.as_view(), name="student-history"),
+    path("dashboard/page", StudentPortalView.as_view(), name="student-portal"),
     path("sessions", SessionListView.as_view(), name="attendance-sessions"),
     path("sessions/start", SessionStartView.as_view(), name="attendance-session-start"),
     path(
