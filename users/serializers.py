@@ -9,6 +9,12 @@ from .services import register_user
 class RegistrationSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150)
     email = serializers.EmailField()
+    usn = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
     password = serializers.CharField(write_only=True, validators=[validate_password])
     role = serializers.ChoiceField(
         choices=[User.Role.STUDENT, User.Role.FACULTY]

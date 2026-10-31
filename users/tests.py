@@ -25,9 +25,29 @@ class RegistrationTests(TestCase):
         user = get_user_model().objects.get(email="student@example.com")
         self.assertEqual(user.name, "A Student")
         self.assertEqual(user.role, "student")
+        self.assertIsNone(user.usn)
         self.assertTrue(user.check_password("StrongPass123!"))
         self.assertNotEqual(user.password, "StrongPass123!")
         self.assertNotIn("password", response.json())
+
+    def test_registration_stores_optional_usn(self):
+        response = self.client.post(
+            reverse("register"),
+            {
+                "name": "A Student",
+                "email": "usn-student@example.com",
+                "password": "StrongPass123!",
+                "role": "student",
+                "usn": "PES1UG24CS083",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["usn"], "PES1UG24CS083")
+        self.assertEqual(
+            get_user_model().objects.get(email="usn-student@example.com").usn,
+            "PES1UG24CS083",
+        )
 
     def test_public_registration_cannot_create_admin(self):
         response = self.client.post(
