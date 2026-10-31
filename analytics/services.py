@@ -9,7 +9,22 @@ from users.models import User
 from .models import AttendanceRecord, AttendanceSession, Enrollment, Section
 
 
-def calculate_attendance_percentage(student, course, *, section=None):
+def _filter_session_dates(queryset, *, start_date=None, end_date=None):
+    if start_date is not None:
+        queryset = queryset.filter(date__gte=start_date)
+    if end_date is not None:
+        queryset = queryset.filter(date__lte=end_date)
+    return queryset
+
+
+def calculate_attendance_percentage(
+    student,
+    course,
+    *,
+    section=None,
+    start_date=None,
+    end_date=None,
+):
     """
     Calculate a student's attendance percentage for one course.
 
@@ -23,6 +38,11 @@ def calculate_attendance_percentage(student, course, *, section=None):
     ).distinct()
     if section is not None:
         eligible_sessions = eligible_sessions.filter(section=section)
+    eligible_sessions = _filter_session_dates(
+        eligible_sessions,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     total_sessions = eligible_sessions.count()
 
@@ -46,7 +66,13 @@ def calculate_attendance_percentage(student, course, *, section=None):
     )
 
 
-def identify_students_below_threshold(course, section=None):
+def identify_students_below_threshold(
+    course,
+    section=None,
+    *,
+    start_date=None,
+    end_date=None,
+):
     """
     Return enrolled students whose attendance is below the course threshold.
 
@@ -69,7 +95,13 @@ def identify_students_below_threshold(course, section=None):
 
     for enrollment in enrollments:
         student = enrollment.student
-        percentage = calculate_attendance_percentage(student, course)
+        percentage = calculate_attendance_percentage(
+            student,
+            course,
+            section=section,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         if percentage < threshold:
             results.append(
@@ -83,11 +115,16 @@ def identify_students_below_threshold(course, section=None):
     return results
 
 
-def section_defaulters(*, section_id, user):
+def section_defaulters(*, section_id, user, start_date=None, end_date=None):
     """Return enrolled students below this section's course threshold (FR-031)."""
     section = _report_section_for_user(section_id=section_id, user=user)
 
-    defaulters = identify_students_below_threshold(section.course, section=section)
+    defaulters = identify_students_below_threshold(
+        section.course,
+        section=section,
+        start_date=start_date,
+        end_date=end_date,
+    )
     results = [
         {
             "student_name": defaulter["student"].name,
@@ -120,13 +157,21 @@ def _report_section_for_user(*, section_id, user):
     return section
 
 
-def section_attendance_summary(*, section_id, user):
+def section_attendance_summary(
+    *,
+    section_id,
+    user,
+    start_date=None,
+    end_date=None,
+):
     """Summarize closed-session attendance for one section (FR-032)."""
     section = _report_section_for_user(section_id=section_id, user=user)
-    session_summary = AttendanceSession.objects.filter(
-        section=section,
-        closed=True,
-    ).aggregate(
+    closed_sessions = _filter_session_dates(
+        AttendanceSession.objects.filter(section=section, closed=True),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    session_summary = closed_sessions.aggregate(
         total_sessions=Count("pk"),
         start_date=Min("date"),
         end_date=Max("date"),
@@ -145,6 +190,8 @@ def section_attendance_summary(*, section_id, user):
             enrollment.student,
             section.course,
             section=section,
+            start_date=start_date,
+            end_date=end_date,
         )
         for enrollment in enrollments
     ]

@@ -23,6 +23,8 @@ class DefaulterReportView(APIView):
         section, entries = services.section_defaulters(
             section_id=query.validated_data["section_id"],
             user=request.user,
+            start_date=query.validated_data.get("start_date"),
+            end_date=query.validated_data.get("end_date"),
         )
         return Response(
             {
@@ -50,5 +52,7 @@ class SectionAttendanceSummaryView(APIView):
         summary = services.section_attendance_summary(
             section_id=query.validated_data["section_id"],
             user=request.user,
+            start_date=query.validated_data.get("start_date"),
+            end_date=query.validated_data.get("end_date"),
         )
         return Response(SectionAttendanceSummarySerializer(instance=summary).data)
