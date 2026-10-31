@@ -44,13 +44,17 @@ def student_dashboard_courses(student):
     return results
 
 
-def student_session_history(student):
+def student_session_history(student, *, from_date=None, to_date=None):
     """FR-021: the student's finalized sessions, including unmarked absences."""
+    sessions = AttendanceSession.objects.filter(
+        section__enrollments__student=student, closed=True
+    )
+    if from_date is not None:
+        sessions = sessions.filter(date__gte=from_date)
+    if to_date is not None:
+        sessions = sessions.filter(date__lte=to_date)
     sessions = (
-        AttendanceSession.objects.filter(
-            section__enrollments__student=student, closed=True
-        )
-        .select_related("section__course")
+        sessions.select_related("section__course")
         .prefetch_related(
             Prefetch(
                 "records",
