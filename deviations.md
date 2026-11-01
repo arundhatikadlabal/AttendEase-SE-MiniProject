@@ -121,3 +121,15 @@ They use the same no-trailing-slash style as `/api/auth/`. `my-sections` returns
 **Why:** A configurable deployment default supports a working demo without adding a per-course policy or an administration interface not defined in the documents. Legacy closed sessions without a closure timestamp cannot safely establish eligibility. Approval of a student correction remains the separate FR-027 workflow.
 
 **Introduced in:** `feature/fr-038-attendance-edit-window`.
+
+### D-11: Attendance history is preserved with append-only application audit entries (NFR-003, SEC-006)
+
+**Implementation:** `attendance.AttendanceAuditEntry` stores the attendance-record reference, actor, time, action, old and new marks, optional correction-request reference, and decision reason. Initial marks, open-session changes, bulk marking, timed edits, and correction decisions write entries in the same transaction as the change. Failed audit writes roll back the business change. Rejections are logged even though the attendance mark stays unchanged; unchanged marking operations do not invent changes.
+
+Existing attendance receives a `BASELINE` entry during migration, with the current mark and no actor. This does not reconstruct earlier history or invent who originally marked it. Original student and faculty rejection reasons remain separate on the correction request.
+
+The application blocks attendance deletion, including ORM cascades from sessions or students, and blocks ordinary model/queryset updates and deletion of audit entries. This is application-level retention, not protection against a database owner issuing raw SQL. Attendance creation or changes made outside these service functions are outside the automatic actor-attributed logging path.
+
+`GET /api/attendance/sessions/{session_id}/records/{student_id}/history` provides chronological, paginated read-only history. Students can read their own history, faculty the records for currently assigned sections, and administrators any record. No API is provided to edit or delete history.
+
+**Introduced in:** `feature/nfr-003-attendance-audit`, integrating FR-027, FR-028, and FR-038.

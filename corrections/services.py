@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from analytics.models import AttendanceRecord, Enrollment
+from attendance.audit import append_change
 from users.models import User
 
 from .models import CorrectionRequest
@@ -101,12 +102,21 @@ def approve_correction(*, faculty, correction_id):
     with transaction.atomic():
         record, correction = _locked_pending_correction(faculty, correction_id)
 
+        old_status = record.status
         record.status = AttendanceRecord.Status.PRESENT
         record.save(update_fields=["status"])
         correction.status = CorrectionRequest.Status.APPROVED
         correction.acted_by = faculty
         correction.acted_at = timezone.now()
         correction.save(update_fields=["status", "acted_by", "acted_at"])
+        append_change(
+            record=record,
+            actor=faculty,
+            action="APPROVED",
+            old_status=old_status,
+            correction=correction,
+            reason=correction.reason,
+        )
         return correction
 
 
@@ -134,12 +144,20 @@ def reject_correction(*, faculty, correction_id, reason):
         )
 
     with transaction.atomic():
-        _, correction = _locked_pending_correction(faculty, correction_id)
+        record, correction = _locked_pending_correction(faculty, correction_id)
         correction.status = CorrectionRequest.Status.REJECTED
         correction.rejection_reason = reason.strip()
         correction.acted_by = faculty
         correction.acted_at = timezone.now()
         correction.save(
             update_fields=["status", "rejection_reason", "acted_by", "acted_at"]
+        )
+        append_change(
+            record=record,
+            actor=faculty,
+            action="REJECTED",
+            old_status=record.status,
+            correction=correction,
+            reason=correction.rejection_reason,
         )
         return correction
