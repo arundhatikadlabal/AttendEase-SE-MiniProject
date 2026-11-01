@@ -133,7 +133,7 @@ class SessionRosterView(APIView):
 
 
 class StudentMarkView(APIView):
-    """FR-016: faculty mark one student present or absent (per-student toggle)."""
+    """FR-016: open-session marking; FR-038: edits after session closure."""
 
     allowed_roles = (User.Role.FACULTY,)
 
@@ -141,6 +141,17 @@ class StudentMarkView(APIView):
         serializer = StudentMarkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         record = services.mark_student(
+            faculty=request.user,
+            session_id=session_id,
+            student_id=student_id,
+            status=serializer.validated_data["status"],
+        )
+        return Response(record_data(record))
+
+    def patch(self, request, session_id, student_id):
+        serializer = StudentMarkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = services.edit_closed_record(
             faculty=request.user,
             session_id=session_id,
             student_id=student_id,

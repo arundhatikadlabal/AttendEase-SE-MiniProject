@@ -151,3 +151,9 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() == "true"
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() == "true"
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "AttendEase <no-reply@example.com>")
+
+
+# FR-038: deployment-wide window after closure; zero disables direct edits.
+ATTENDANCE_EDIT_WINDOW_SECONDS = int(
+    os.environ.get("ATTENDANCE_EDIT_WINDOW_SECONDS", "86400")
+)
