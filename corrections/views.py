@@ -6,11 +6,16 @@ from rest_framework.views import APIView
 from users.models import User
 
 from .serializers import (
+    CorrectionApprovalSerializer,
     CorrectionSubmissionSerializer,
     correction_data,
     pending_correction_data,
 )
-from .services import pending_corrections_for_faculty, submit_correction
+from .services import (
+    approve_correction,
+    pending_corrections_for_faculty,
+    submit_correction,
+)
 
 
 class CorrectionQueuePagination(PageNumberPagination):
@@ -39,3 +44,17 @@ class CorrectionSubmissionView(APIView):
             student=request.user, **serializer.validated_data
         )
         return Response(correction_data(correction), status=status.HTTP_201_CREATED)
+
+
+class CorrectionDecisionView(APIView):
+    """FR-027: the section's assigned faculty may approve a pending request."""
+
+    allowed_roles = (User.Role.FACULTY,)
+
+    def patch(self, request, correction_id):
+        serializer = CorrectionApprovalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        correction = approve_correction(
+            faculty=request.user, correction_id=correction_id
+        )
+        return Response(correction_data(correction), status=status.HTTP_200_OK)

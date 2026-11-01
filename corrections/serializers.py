@@ -37,3 +37,7 @@ def pending_correction_data(correction):
         }
     )
     return data
+
+
+class CorrectionApprovalSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=("approve",))

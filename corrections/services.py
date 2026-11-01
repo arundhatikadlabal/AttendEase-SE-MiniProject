@@ -1,9 +1,10 @@
-"""Student correction submission (FR-024); decisions are separate stories."""
+"""Correction submission, faculty queue, and approval services."""
 
 from functools import partial
 
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from analytics.models import AttendanceRecord, Enrollment
@@ -63,7 +64,7 @@ def submit_correction(*, student, record_id, reason):
             if pending.exists():
                 raise PendingCorrectionConflict() from error
             raise
-            
+
         # A rolled-back request must never send an email. Unexpected callback
         # failures are also non-fatal to the already committed correction.
         transaction.on_commit(partial(notify_faculty, correction.pk), robust=True)
@@ -85,3 +86,35 @@ def pending_corrections_for_faculty(faculty):
         .order_by("created_at", "pk")
     )
 
+
+class CorrectionAlreadyResolved(APIException):
+    status_code = 409
+    default_detail = "This correction request is no longer pending."
+    default_code = "correction_resolved"
+
+
+def approve_correction(*, faculty, correction_id):
+    """FR-027: approve a pending request and its attendance update atomically."""
+    if not faculty.is_active or faculty.role != User.Role.FACULTY:
+        raise PermissionDenied("Only active faculty may approve corrections.")
+
+    with transaction.atomic():
+        reference = get_object_or_404(CorrectionRequest, pk=correction_id)
+        # Match submission's record-first lock order, including when a new
+        # pending request is submitted as an earlier request is resolved.
+        record = AttendanceRecord.objects.select_for_update().get(
+            pk=reference.record_id
+        )
+        correction = CorrectionRequest.objects.select_for_update().get(pk=correction_id)
+        if record.session.section.faculty_id != faculty.pk:
+            raise PermissionDenied("You are not assigned to this section.")
+        if correction.status != CorrectionRequest.Status.PENDING:
+            raise CorrectionAlreadyResolved()
+
+        record.status = AttendanceRecord.Status.PRESENT
+        record.save(update_fields=["status"])
+        correction.status = CorrectionRequest.Status.APPROVED
+        correction.acted_by = faculty
+        correction.acted_at = timezone.now()
+        correction.save(update_fields=["status", "acted_by", "acted_at"])
+        return correction
