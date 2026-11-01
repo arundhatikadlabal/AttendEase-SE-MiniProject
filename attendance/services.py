@@ -1,7 +1,7 @@
 """Attendance sessions and records over the shared analytics models (FR-014 to FR-019, FR-037)."""
 
 from django.db import IntegrityError, transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Prefetch, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import (
@@ -11,7 +11,9 @@ from rest_framework.exceptions import (
     ValidationError,
 )
 
+from academic.services import sections_for_user
 from analytics.models import AttendanceRecord, AttendanceSession, Enrollment
+from analytics.services import calculate_attendance_percentage
 from users.models import User
 
 
@@ -19,6 +21,67 @@ class DuplicateAttendance(APIException):
     status_code = 409
     default_detail = "Attendance already exists for this student and session."
     default_code = "duplicate_attendance"
+
+
+def student_dashboard_courses(student):
+    """FR-020: one attendance percentage per enrolled active course."""
+    courses = {
+        section.course_id: section.course for section in sections_for_user(student)
+    }
+    results = []
+    for course in sorted(courses.values(), key=lambda item: item.code):
+        percentage = calculate_attendance_percentage(student, course)
+        results.append(
+            {
+                "course_id": course.pk,
+                "course_code": course.code,
+                "course_title": course.title,
+                "attendance_percentage": percentage,
+                "threshold": course.shortage_threshold,
+                "below_threshold": percentage < course.shortage_threshold,
+            }
+        )
+    return results
+
+
+def student_session_history(student, *, from_date=None, to_date=None):
+    """FR-021: the student's finalized sessions, including unmarked absences."""
+    sessions = AttendanceSession.objects.filter(
+        section__enrollments__student=student, closed=True
+    )
+    if from_date is not None:
+        sessions = sessions.filter(date__gte=from_date)
+    if to_date is not None:
+        sessions = sessions.filter(date__lte=to_date)
+    sessions = (
+        sessions.select_related("section__course")
+        .prefetch_related(
+            Prefetch(
+                "records",
+                queryset=AttendanceRecord.objects.filter(student=student),
+                to_attr="student_records",
+            )
+        )
+        .distinct()
+        .order_by("-date", "-pk")
+    )
+    return [
+        {
+            "session_id": session.pk,
+            "date": session.date.isoformat(),
+            "course_id": session.section.course_id,
+            "course_code": session.section.course.code,
+            "course_title": session.section.course.title,
+            "section_id": session.section_id,
+            "section_code": session.section.code,
+            "status": (
+                session.student_records[0].status.lower()
+                if session.student_records
+                else "absent"
+            ),
+        }
+        for session in sessions
+    ]
 
 
 def submit_records(*, faculty, session_id, records):
@@ -155,7 +218,9 @@ def start_session(*, faculty, timetable_slot, date):
                 )
             }
         )
-    if AttendanceSession.objects.filter(timetable_slot=timetable_slot, date=date).exists():
+    if AttendanceSession.objects.filter(
+        timetable_slot=timetable_slot, date=date
+    ).exists():
         raise SessionConflict()
     try:
         with transaction.atomic():

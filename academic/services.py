@@ -32,19 +32,22 @@ def _require_role(user, role, label):
 DUPLICATE_COURSE_MESSAGE = "A course with this code already exists."
 
 
-def create_course(*, code, title):
+def create_course(*, code, title, shortage_threshold=None):
     """FR-006: create a course with a unique code."""
     code = normalize_code(code)
     if Course.objects.filter(code=code).exists():
         raise AcademicConflict("code", DUPLICATE_COURSE_MESSAGE)
+    course_data = {"code": code, "title": title.strip()}
+    if shortage_threshold is not None:
+        course_data["shortage_threshold"] = shortage_threshold
     try:
         with transaction.atomic():
-            return Course.objects.create(code=code, title=title.strip())
+            return Course.objects.create(**course_data)
     except IntegrityError as error:
         raise AcademicConflict("code", DUPLICATE_COURSE_MESSAGE) from error
 
 
-def update_course(course, *, code=None, title=None):
+def update_course(course, *, code=None, title=None, shortage_threshold=None):
     """FR-006: edit a course's code and/or title."""
     if code is not None:
         code = normalize_code(code)
@@ -53,6 +56,8 @@ def update_course(course, *, code=None, title=None):
         course.code = code
     if title is not None:
         course.title = title.strip()
+    if shortage_threshold is not None:
+        course.shortage_threshold = shortage_threshold
     try:
         with transaction.atomic():
             course.save()

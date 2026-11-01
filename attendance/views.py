@@ -1,4 +1,9 @@
+import re
+from datetime import date
+
+from django.views.generic import TemplateView
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -16,6 +21,50 @@ from .serializers import (
 from .services import submit_records
 
 FACULTY_OR_ADMIN = (User.Role.FACULTY, User.Role.ADMIN)
+
+
+class StudentPortalView(TemplateView):
+    """NFR-007: responsive page; all student data still comes from protected APIs."""
+
+    template_name = "attendance/student_portal.html"
+
+
+class StudentDashboardView(APIView):
+    """FR-020: show the student's attendance for each enrolled course."""
+
+    allowed_roles = (User.Role.STUDENT,)
+
+    def get(self, request):
+        return Response({"courses": services.student_dashboard_courses(request.user)})
+
+
+class StudentHistoryView(APIView):
+    """FR-021: finalized session-by-session attendance for a student."""
+
+    allowed_roles = (User.Role.STUDENT,)
+
+    def get(self, request):
+        dates = {}
+        for key in ("from", "to"):
+            raw = request.query_params.get(key)
+            if raw is None:
+                dates[key] = None
+                continue
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+                raise ValidationError({key: "Use YYYY-MM-DD."})
+            try:
+                dates[key] = date.fromisoformat(raw)
+            except ValueError as error:
+                raise ValidationError({key: "Enter a valid date."}) from error
+        if dates["from"] and dates["to"] and dates["from"] > dates["to"]:
+            raise ValidationError({"from": "Must be on or before to."})
+        return Response(
+            {
+                "history": services.student_session_history(
+                    request.user, from_date=dates["from"], to_date=dates["to"]
+                )
+            }
+        )
 
 
 class AttendanceRecordsView(APIView):

@@ -1,9 +1,11 @@
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
+from rest_framework.test import APIClient
 
 from .models import (
     AttendanceRecord,
@@ -145,3 +147,594 @@ class AttendanceShortageTests(AttendancePercentageTests):
         results = identify_students_below_threshold(self.course)
 
         self.assertEqual(results, [])
+
+
+class DefaulterReportApiTests(TestCase):
+    def setUp(self):
+        self.faculty = get_user_model().objects.create_user(
+            email="report-faculty@example.com",
+            name="Report Faculty",
+            role="faculty",
+            password="test-password",
+        )
+        self.other_faculty = get_user_model().objects.create_user(
+            email="other-report-faculty@example.com",
+            name="Other Faculty",
+            role="faculty",
+            password="test-password",
+        )
+        self.admin = get_user_model().objects.create_superuser(
+            email="report-admin@example.com",
+            name="Report Admin",
+            password="test-password",
+        )
+        self.below = get_user_model().objects.create_user(
+            email="below@example.com",
+            name="Below Threshold",
+            role="student",
+            usn="PES1UG24CS001",
+        )
+        self.at_threshold = get_user_model().objects.create_user(
+            email="at@example.com",
+            name="At Threshold",
+            role="student",
+            usn="PES1UG24CS002",
+        )
+        self.no_attendance = get_user_model().objects.create_user(
+            email="none@example.com",
+            name="No Attendance",
+            role="student",
+        )
+        self.course = Course.objects.create(
+            code="CS201",
+            title="Algorithms",
+            shortage_threshold=Decimal("75.00"),
+        )
+        self.section = Section.objects.create(
+            course=self.course,
+            code="A",
+            faculty=self.faculty,
+        )
+        Enrollment.objects.bulk_create(
+            [
+                Enrollment(section=self.section, student=student)
+                for student in (self.below, self.at_threshold, self.no_attendance)
+            ]
+        )
+        self.client = APIClient()
+        self.url = reverse("analytics-defaulters")
+
+    def create_sessions(self, section, total):
+        return [
+            AttendanceSession.objects.create(
+                section=section,
+                date=date(2026, 1, 1) + timedelta(days=index),
+                closed=True,
+            )
+            for index in range(total)
+        ]
+
+    def add_attendance(self, sessions, student, *, present):
+        for index, session in enumerate(sessions):
+            status = (
+                AttendanceRecord.Status.PRESENT
+                if index < present
+                else AttendanceRecord.Status.ABSENT
+            )
+            AttendanceRecord.objects.create(
+                session=session,
+                student=student,
+                status=status,
+            )
+
+    def report_as(self, user, section=None):
+        self.client.force_authenticate(user=user)
+        return self.client.get(
+            self.url,
+            {"section_id": section.pk if section else self.section.pk},
+        )
+
+    def test_report_lists_only_below_threshold_with_required_columns(self):
+        sessions = self.create_sessions(self.section, total=20)
+        self.add_attendance(sessions, self.below, present=14)
+        self.add_attendance(sessions, self.at_threshold, present=15)
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            body["section"],
+            {"id": self.section.pk, "code": "A", "course": "CS201"},
+        )
+        self.assertEqual(len(body["students"]), 2)
+        self.assertEqual(
+            body["students"],
+            [
+                {
+                    "student_name": "Below Threshold",
+                    "usn": "PES1UG24CS001",
+                    "course": "CS201",
+                    "attendance_percentage": "70.00",
+                    "threshold": "75.00",
+                    "status": "Defaulter",
+                },
+                {
+                    "student_name": "No Attendance",
+                    "usn": None,
+                    "course": "CS201",
+                    "attendance_percentage": "0.00",
+                    "threshold": "75.00",
+                    "status": "Defaulter",
+                },
+            ],
+        )
+
+    def test_students_at_or_above_threshold_are_not_reported(self):
+        sessions = self.create_sessions(self.section, total=20)
+        self.add_attendance(sessions, self.below, present=20)
+        self.add_attendance(sessions, self.at_threshold, present=15)
+        self.add_attendance(sessions, self.no_attendance, present=20)
+        above = get_user_model().objects.create_user(
+            email="above@example.com",
+            name="Above Threshold",
+            role="student",
+        )
+        Enrollment.objects.create(section=self.section, student=above)
+        self.add_attendance(sessions, above, present=16)
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["students"], [])
+
+    def test_threshold_is_taken_from_each_courses_configuration(self):
+        second_course = Course.objects.create(
+            code="CS202",
+            title="Operating Systems",
+            shortage_threshold=Decimal("60.00"),
+        )
+        second_section = Section.objects.create(
+            course=second_course,
+            code="A",
+            faculty=self.faculty,
+        )
+        Enrollment.objects.filter(section=self.section).exclude(
+            student=self.below
+        ).delete()
+        Enrollment.objects.create(section=second_section, student=self.below)
+        first_sessions = self.create_sessions(self.section, total=10)
+        second_sessions = self.create_sessions(second_section, total=10)
+        self.add_attendance(first_sessions, self.below, present=7)
+        self.add_attendance(second_sessions, self.below, present=7)
+
+        first_report = self.report_as(self.faculty, self.section)
+        second_report = self.report_as(self.faculty, second_section)
+
+        self.assertEqual(len(first_report.json()["students"]), 1)
+        self.assertEqual(first_report.json()["students"][0]["threshold"], "75.00")
+        self.assertEqual(second_report.json()["students"], [])
+
+    def test_zero_threshold_does_not_classify_zero_attendance_as_below(self):
+        self.course.shortage_threshold = Decimal("0.00")
+        self.course.save(update_fields=["shortage_threshold"])
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["students"], [])
+
+    def test_report_is_limited_to_students_enrolled_in_requested_section(self):
+        other_course = Course.objects.create(code="CS203", title="Databases")
+        other_section = Section.objects.create(
+            course=other_course,
+            code="B",
+            faculty=self.faculty,
+        )
+        other_student = get_user_model().objects.create_user(
+            email="other-student@example.com",
+            name="Other Section Student",
+            role="student",
+        )
+        Enrollment.objects.create(section=other_section, student=other_student)
+
+        response = self.report_as(self.faculty, other_section)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [entry["student_name"] for entry in response.json()["students"]],
+            ["Other Section Student"],
+        )
+
+    def test_date_filters_change_defaulter_calculations(self):
+        Enrollment.objects.filter(section=self.section).exclude(
+            student=self.below
+        ).delete()
+        sessions = self.create_sessions(self.section, total=4)
+        for index, session in enumerate(sessions):
+            AttendanceRecord.objects.create(
+                session=session,
+                student=self.below,
+                status=(
+                    AttendanceRecord.Status.PRESENT
+                    if index in (0, 3)
+                    else AttendanceRecord.Status.ABSENT
+                ),
+            )
+
+        full_range = self.report_as(self.faculty)
+        start_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "start_date": "2026-01-04"},
+        )
+        end_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "end_date": "2026-01-03"},
+        )
+        combined = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-01-02",
+                "end_date": "2026-01-03",
+            },
+        )
+
+        self.assertEqual(full_range.status_code, 200)
+        self.assertEqual(full_range.json()["students"][0]["attendance_percentage"], "50.00")
+        self.assertEqual(start_filtered.status_code, 200)
+        self.assertEqual(start_filtered.json()["students"], [])
+        self.assertEqual(end_filtered.status_code, 200)
+        self.assertEqual(
+            end_filtered.json()["students"][0]["attendance_percentage"], "33.33"
+        )
+        self.assertEqual(combined.status_code, 200)
+        self.assertEqual(
+            combined.json()["students"][0]["attendance_percentage"], "0.00"
+        )
+
+        self.course.shortage_threshold = Decimal("0.00")
+        self.course.save(update_fields=["shortage_threshold"])
+        no_matches = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-01-10",
+                "end_date": "2026-01-11",
+            },
+        )
+        self.assertEqual(no_matches.status_code, 200)
+        self.assertEqual(no_matches.json()["students"], [])
+
+    def test_invalid_date_formats_and_reversed_ranges_are_rejected_on_reports(self):
+        self.client.force_authenticate(user=self.faculty)
+        urls = (self.url, reverse("analytics-summary"))
+
+        for url in urls:
+            with self.subTest(url=url):
+                invalid = self.client.get(
+                    url,
+                    {"section_id": self.section.pk, "start_date": "not-a-date"},
+                )
+                reversed_range = self.client.get(
+                    url,
+                    {
+                        "section_id": self.section.pk,
+                        "start_date": "2026-10-02",
+                        "end_date": "2026-10-01",
+                    },
+                )
+                invalid_calendar_date = self.client.get(
+                    url,
+                    {"section_id": self.section.pk, "end_date": "2026-02-30"},
+                )
+
+                self.assertEqual(invalid.status_code, 400)
+                self.assertEqual(reversed_range.status_code, 400)
+                self.assertEqual(invalid_calendar_date.status_code, 400)
+
+    def test_missing_malformed_and_unknown_section_ids_are_rejected(self):
+        self.client.force_authenticate(user=self.faculty)
+
+        missing = self.client.get(self.url)
+        malformed = self.client.get(self.url, {"section_id": "nope"})
+        zero = self.client.get(self.url, {"section_id": 0})
+        unknown = self.client.get(self.url, {"section_id": 99999})
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(malformed.status_code, 400)
+        self.assertEqual(zero.status_code, 400)
+        self.assertEqual(unknown.status_code, 404)
+
+    def test_authentication_and_section_authorization_are_enforced(self):
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+
+        with self.assertLogs("users.permissions", level="WARNING"):
+            student = self.report_as(self.below)
+        other_faculty = self.report_as(self.other_faculty)
+        administrator = self.report_as(self.admin)
+        assigned_faculty = self.report_as(self.faculty)
+
+        self.assertEqual(student.status_code, 403)
+        self.assertEqual(other_faculty.status_code, 403)
+        self.assertEqual(administrator.status_code, 200)
+        self.assertEqual(assigned_faculty.status_code, 200)
+
+
+class SectionAttendanceSummaryTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.faculty = User.objects.create_user(
+            email="summary-faculty@example.com",
+            name="Summary Faculty",
+            role="faculty",
+        )
+        self.other_faculty = User.objects.create_user(
+            email="other-summary-faculty@example.com",
+            name="Other Faculty",
+            role="faculty",
+        )
+        self.admin = User.objects.create_superuser(
+            email="summary-admin@example.com",
+            name="Summary Admin",
+            password="test-password",
+        )
+        self.students = [
+            User.objects.create_user(
+                email=f"summary-student{index}@example.com",
+                name=f"Summary Student {index}",
+                role=User.Role.STUDENT,
+            )
+            for index in range(2)
+        ]
+        self.course = Course.objects.create(code="CS301", title="Data Science")
+        self.section = Section.objects.create(
+            course=self.course,
+            code="A",
+            faculty=self.faculty,
+        )
+        Enrollment.objects.bulk_create(
+            [
+                Enrollment(section=self.section, student=student)
+                for student in self.students
+            ]
+        )
+        self.client = APIClient()
+        self.url = reverse("analytics-summary")
+
+    def report_as(self, user, section=None):
+        self.client.force_authenticate(user=user)
+        return self.client.get(
+            self.url,
+            {"section_id": section.pk if section else self.section.pk},
+        )
+
+    def create_sessions(self, section, dates, *, closed=True):
+        return [
+            AttendanceSession.objects.create(
+                section=section,
+                date=session_date,
+                closed=closed,
+            )
+            for session_date in dates
+        ]
+
+    def mark_present(self, sessions, student, count):
+        for session in sessions[:count]:
+            AttendanceRecord.objects.create(
+                session=session,
+                student=student,
+                status=AttendanceRecord.Status.PRESENT,
+            )
+
+    def test_summary_averages_students_and_uses_closed_section_sessions(self):
+        closed_sessions = self.create_sessions(
+            self.section,
+            [date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
+        )
+        self.mark_present(closed_sessions, self.students[0], 3)
+        self.mark_present(closed_sessions, self.students[1], 1)
+        open_session = self.create_sessions(
+            self.section,
+            [date(2026, 9, 5)],
+            closed=False,
+        )
+        self.mark_present(open_session, self.students[0], 1)
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "section": {
+                    "id": self.section.pk,
+                    "code": "A",
+                    "course": "CS301",
+                },
+                "date_range": {
+                    "start_date": "2026-09-01",
+                    "end_date": "2026-09-04",
+                },
+                "average_attendance_percentage": "50.00",
+                "total_sessions": 4,
+            },
+        )
+
+    def test_empty_section_returns_zero_and_null_date_range(self):
+        empty_section = Section.objects.create(
+            course=self.course,
+            code="B",
+            faculty=self.faculty,
+        )
+
+        response = self.report_as(self.faculty, empty_section)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "section": {
+                    "id": empty_section.pk,
+                    "code": "B",
+                    "course": "CS301",
+                },
+                "date_range": {"start_date": None, "end_date": None},
+                "average_attendance_percentage": "0.00",
+                "total_sessions": 0,
+            },
+        )
+
+    def test_missing_records_count_as_absences_and_no_sessions_return_zero(self):
+        closed_sessions = self.create_sessions(
+            self.section,
+            [date(2026, 9, 1), date(2026, 9, 2)],
+        )
+        self.mark_present(closed_sessions, self.students[0], 1)
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_sessions"], 2)
+        self.assertEqual(response.json()["average_attendance_percentage"], "25.00")
+
+        empty_course = Course.objects.create(code="CS302", title="Networks")
+        no_sessions_section = Section.objects.create(
+            course=empty_course,
+            code="A",
+            faculty=self.faculty,
+        )
+        Enrollment.objects.create(
+            section=no_sessions_section,
+            student=self.students[0],
+        )
+        no_sessions = self.report_as(self.faculty, no_sessions_section)
+
+        self.assertEqual(no_sessions.status_code, 200)
+        self.assertEqual(no_sessions.json()["average_attendance_percentage"], "0.00")
+        self.assertEqual(no_sessions.json()["total_sessions"], 0)
+        self.assertEqual(
+            no_sessions.json()["date_range"],
+            {"start_date": None, "end_date": None},
+        )
+
+    def test_perfect_attendance_returns_one_hundred_percent(self):
+        sessions = self.create_sessions(
+            self.section,
+            [date(2026, 9, 1), date(2026, 9, 2)],
+        )
+        for student in self.students:
+            self.mark_present(sessions, student, 2)
+
+        response = self.report_as(self.faculty)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["average_attendance_percentage"], "100.00")
+
+    def test_report_counts_sessions_only_for_the_requested_section(self):
+        other_section = Section.objects.create(
+            course=self.course,
+            code="B",
+            faculty=self.other_faculty,
+        )
+        Enrollment.objects.create(
+            section=other_section,
+            student=self.students[0],
+        )
+        self.create_sessions(self.section, [date(2026, 9, 1)])
+        self.create_sessions(
+            other_section,
+            [date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
+        )
+
+        self.client.force_authenticate(user=self.faculty)
+        response = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-01",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_sessions"], 1)
+        self.assertEqual(response.json()["date_range"]["start_date"], "2026-09-01")
+        self.assertEqual(response.json()["average_attendance_percentage"], "0.00")
+
+    def test_date_filters_apply_before_summary_calculations(self):
+        sessions = self.create_sessions(
+            self.section,
+            [date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
+        )
+        for student in self.students:
+            self.mark_present(sessions, student, 1)
+
+        full_range = self.report_as(self.faculty)
+        start_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "start_date": "2026-09-02"},
+        )
+        end_filtered = self.client.get(
+            self.url,
+            {"section_id": self.section.pk, "end_date": "2026-09-01"},
+        )
+        combined = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-02",
+                "end_date": "2026-09-03",
+            },
+        )
+        no_matches = self.client.get(
+            self.url,
+            {
+                "section_id": self.section.pk,
+                "start_date": "2026-09-10",
+                "end_date": "2026-09-11",
+            },
+        )
+
+        self.assertEqual(full_range.status_code, 200)
+        self.assertEqual(full_range.json()["total_sessions"], 4)
+        self.assertEqual(full_range.json()["average_attendance_percentage"], "25.00")
+        self.assertEqual(start_filtered.json()["total_sessions"], 3)
+        self.assertEqual(start_filtered.json()["date_range"]["start_date"], "2026-09-02")
+        self.assertEqual(start_filtered.json()["average_attendance_percentage"], "0.00")
+        self.assertEqual(end_filtered.json()["total_sessions"], 1)
+        self.assertEqual(end_filtered.json()["average_attendance_percentage"], "100.00")
+        self.assertEqual(combined.json()["total_sessions"], 2)
+        self.assertEqual(combined.json()["average_attendance_percentage"], "0.00")
+        self.assertEqual(no_matches.status_code, 200)
+        self.assertEqual(no_matches.json()["total_sessions"], 0)
+        self.assertEqual(
+            no_matches.json()["date_range"],
+            {"start_date": None, "end_date": None},
+        )
+
+    def test_missing_malformed_and_unknown_section_ids_are_rejected(self):
+        self.client.force_authenticate(user=self.faculty)
+
+        missing = self.client.get(self.url)
+        malformed = self.client.get(self.url, {"section_id": "nope"})
+        zero = self.client.get(self.url, {"section_id": 0})
+        unknown = self.client.get(self.url, {"section_id": 99999})
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(malformed.status_code, 400)
+        self.assertEqual(zero.status_code, 400)
+        self.assertEqual(unknown.status_code, 404)
+
+    def test_only_assigned_faculty_and_administrators_can_view_summary(self):
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+
+        student = self.report_as(self.students[0])
+        other_faculty = self.report_as(self.other_faculty)
+        assigned_faculty = self.report_as(self.faculty)
+        administrator = self.report_as(self.admin)
+
+        self.assertEqual(student.status_code, 403)
+        self.assertEqual(other_faculty.status_code, 403)
+        self.assertEqual(assigned_faculty.status_code, 200)
+        self.assertEqual(administrator.status_code, 200)

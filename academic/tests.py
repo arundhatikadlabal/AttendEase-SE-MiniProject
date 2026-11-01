@@ -1,4 +1,5 @@
 from datetime import time
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -77,6 +78,111 @@ class CourseTests(AcademicTestCase):
         self.assertEqual(course.title, "Programming Fundamentals")
         self.assertEqual(course.code, "CS101")
 
+    def test_fr035_admin_configures_threshold_on_course_creation(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-courses"),
+            {
+                "code": "CS201",
+                "title": "Algorithms",
+                "shortage_threshold": "82.50",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            Decimal(str(response.json()["shortage_threshold"])), Decimal("82.50")
+        )
+        self.assertEqual(
+            Course.objects.get(code="CS201").shortage_threshold,
+            Decimal("82.50"),
+        )
+
+    def test_fr035_admin_updates_course_threshold(self):
+        course = self.make_course()
+
+        response = self.as_user(self.admin).patch(
+            reverse("academic-course", args=[course.pk]),
+            {"shortage_threshold": "68.25"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            Decimal(str(response.json()["shortage_threshold"])), Decimal("68.25")
+        )
+        course.refresh_from_db()
+        self.assertEqual(course.shortage_threshold, Decimal("68.25"))
+
+    def test_fr035_threshold_accepts_percentage_boundaries(self):
+        course = self.make_course()
+        url = reverse("academic-course", args=[course.pk])
+
+        for value in ("0.00", "100.00"):
+            with self.subTest(value=value):
+                response = self.as_user(self.admin).patch(
+                    url, {"shortage_threshold": value}, format="json"
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    Decimal(str(response.json()["shortage_threshold"])),
+                    Decimal(value),
+                )
+
+    def test_fr035_threshold_defaults_to_existing_value_when_omitted(self):
+        response = self.as_user(self.admin).post(
+            reverse("academic-courses"),
+            {"code": "CS202", "title": "Operating Systems"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            Decimal(str(response.json()["shortage_threshold"])), Decimal("75.00")
+        )
+        self.assertEqual(
+            Course.objects.get(code="CS202").shortage_threshold,
+            Decimal("75.00"),
+        )
+
+    def test_fr035_threshold_rejects_out_of_range_and_excess_precision(self):
+        course = self.make_course()
+        url = reverse("academic-course", args=[course.pk])
+
+        invalid_create = self.as_user(self.admin).post(
+            reverse("academic-courses"),
+            {
+                "code": "CS203",
+                "title": "Computer Networks",
+                "shortage_threshold": "100.01",
+            },
+        )
+        self.assertEqual(invalid_create.status_code, 400)
+        self.assertFalse(Course.objects.filter(code="CS203").exists())
+
+        for value in ("-0.01", "100.01", "75.123"):
+            with self.subTest(value=value):
+                response = self.as_user(self.admin).patch(
+                    url, {"shortage_threshold": value}, format="json"
+                )
+                self.assertEqual(response.status_code, 400)
+                course.refresh_from_db()
+                self.assertEqual(course.shortage_threshold, Decimal("75.00"))
+
+    def test_fr035_threshold_cannot_be_configured_by_non_admins(self):
+        course = self.make_course()
+        url = reverse("academic-course", args=[course.pk])
+
+        for user in (self.student, self.faculty):
+            with self.subTest(role=user.role), self.assertLogs(
+                "users.permissions", level="WARNING"
+            ):
+                response = self.as_user(user).patch(
+                    url, {"shortage_threshold": "60.00"}, format="json"
+                )
+
+            self.assertEqual(response.status_code, 403)
+            course.refresh_from_db()
+            self.assertEqual(course.shortage_threshold, Decimal("75.00"))
+
     def test_fr006_duplicate_course_code_is_rejected(self):
         self.make_course(code="CS101")
 
@@ -124,15 +230,22 @@ class CourseTests(AcademicTestCase):
                 "users.permissions", level="WARNING"
             ):
                 create = self.as_user(user).post(
-                    reverse("academic-courses"), {"code": "CS999", "title": "Nope"}
+                    reverse("academic-courses"),
+                    {
+                        "code": "CS999",
+                        "title": "Nope",
+                        "shortage_threshold": "60.00",
+                    },
                 )
                 edit = self.client.patch(
                     reverse("academic-course", args=[course.pk]),
-                    {"title": "Nope"},
+                    {"title": "Nope", "shortage_threshold": "60.00"},
                     format="json",
                 )
             self.assertEqual(create.status_code, 403)
             self.assertEqual(edit.status_code, 403)
+        course.refresh_from_db()
+        self.assertEqual(course.shortage_threshold, Decimal("75.00"))
         self.assertEqual(Course.objects.count(), 1)
 
     def test_course_endpoints_require_authentication(self):
