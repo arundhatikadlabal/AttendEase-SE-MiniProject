@@ -1,4 +1,4 @@
-"""Correction submission, faculty queue, and approval services."""
+"""Correction submission, faculty queue, and decision services."""
 
 from functools import partial
 
@@ -99,17 +99,7 @@ def approve_correction(*, faculty, correction_id):
         raise PermissionDenied("Only active faculty may approve corrections.")
 
     with transaction.atomic():
-        reference = get_object_or_404(CorrectionRequest, pk=correction_id)
-        # Match submission's record-first lock order, including when a new
-        # pending request is submitted as an earlier request is resolved.
-        record = AttendanceRecord.objects.select_for_update().get(
-            pk=reference.record_id
-        )
-        correction = CorrectionRequest.objects.select_for_update().get(pk=correction_id)
-        if record.session.section.faculty_id != faculty.pk:
-            raise PermissionDenied("You are not assigned to this section.")
-        if correction.status != CorrectionRequest.Status.PENDING:
-            raise CorrectionAlreadyResolved()
+        record, correction = _locked_pending_correction(faculty, correction_id)
 
         record.status = AttendanceRecord.Status.PRESENT
         record.save(update_fields=["status"])
@@ -117,4 +107,39 @@ def approve_correction(*, faculty, correction_id):
         correction.acted_by = faculty
         correction.acted_at = timezone.now()
         correction.save(update_fields=["status", "acted_by", "acted_at"])
+        return correction
+
+
+def _locked_pending_correction(faculty, correction_id):
+    """Shared decision checks; the caller must hold an atomic transaction."""
+    reference = get_object_or_404(CorrectionRequest, pk=correction_id)
+    # Match submission's record-first lock order, including when a new
+    # pending request is submitted as an earlier request is resolved.
+    record = AttendanceRecord.objects.select_for_update().get(pk=reference.record_id)
+    correction = CorrectionRequest.objects.select_for_update().get(pk=correction_id)
+    if record.session.section.faculty_id != faculty.pk:
+        raise PermissionDenied("You are not assigned to this section.")
+    if correction.status != CorrectionRequest.Status.PENDING:
+        raise CorrectionAlreadyResolved()
+    return record, correction
+
+
+def reject_correction(*, faculty, correction_id, reason):
+    """FR-028: reject with a reason, preserving the original attendance mark."""
+    if not faculty.is_active or faculty.role != User.Role.FACULTY:
+        raise PermissionDenied("Only active faculty may reject corrections.")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 2000:
+        raise ValidationError(
+            {"reason": "Provide a reason between 1 and 2000 characters."}
+        )
+
+    with transaction.atomic():
+        _, correction = _locked_pending_correction(faculty, correction_id)
+        correction.status = CorrectionRequest.Status.REJECTED
+        correction.rejection_reason = reason.strip()
+        correction.acted_by = faculty
+        correction.acted_at = timezone.now()
+        correction.save(
+            update_fields=["status", "rejection_reason", "acted_by", "acted_at"]
+        )
         return correction
