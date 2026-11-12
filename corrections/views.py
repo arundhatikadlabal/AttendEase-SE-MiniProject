@@ -66,3 +66,23 @@ class CorrectionDecisionView(APIView):
                 reason=serializer.validated_data["reason"],
             )
         return Response(correction_data(correction), status=status.HTTP_200_OK)
+
+
+class StudentCorrectionsView(APIView):
+    """Students can inspect only their own correction requests."""
+
+    allowed_roles = (User.Role.STUDENT,)
+
+    def get(self, request):
+        from .models import CorrectionRequest
+
+        queryset = (
+            CorrectionRequest.objects.filter(student=request.user)
+            .select_related("student", "record__session__section__course")
+            .order_by("-created_at", "-pk")
+        )
+        paginator = CorrectionQueuePagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator.get_paginated_response(
+            [pending_correction_data(item) for item in page]
+        )

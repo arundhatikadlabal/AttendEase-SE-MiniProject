@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -48,7 +51,19 @@ class StartSessionSerializer(serializers.Serializer):
 def session_data(session):
     section = session.section
     slot = session.timetable_slot
+    seconds = settings.ATTENDANCE_EDIT_WINDOW_SECONDS
+    deadline = (
+        session.closed_at + timedelta(seconds=seconds) if session.closed_at else None
+    )
+    now = timezone.now()
     return {
+        "edit_deadline": deadline.isoformat() if deadline else None,
+        "editable": bool(
+            session.closed
+            and deadline
+            and seconds > 0
+            and session.closed_at <= now < deadline
+        ),
         "id": session.pk,
         "date": session.date.isoformat(),
         "closed": session.closed,
