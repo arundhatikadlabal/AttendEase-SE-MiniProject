@@ -6,11 +6,13 @@ from .views import (
     MeView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    PeopleSearchView,
     RefreshView,
     RegisterView,
 )
 
 urlpatterns = [
+    path("people", PeopleSearchView.as_view(), name="people-search"),
     path("register", RegisterView.as_view(), name="register"),
     path("login", LoginView.as_view(), name="login"),
     path("refresh", RefreshView.as_view(), name="refresh"),

@@ -1,6 +1,6 @@
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError as PasswordValidationError
-from django.db.models import F
+from django.db.models import F, Q
 from django.shortcuts import render
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -170,4 +170,28 @@ class MeView(APIView):
                 "usn": user.usn,
                 "role": user.role,
             }
+        )
+
+
+class PeopleSearchView(APIView):
+    """Admin-only, bounded lookup for enrollment and faculty assignment."""
+
+    allowed_roles = (User.Role.ADMIN,)
+
+    def get(self, request):
+        role = request.query_params.get("role", "student")
+        if role not in (User.Role.STUDENT, User.Role.FACULTY):
+            return Response({"detail": "Choose student or faculty."}, status=400)
+        query = request.query_params.get("q", "").strip()[:150]
+        people = User.objects.filter(is_active=True, role=role)
+        if query:
+            people = people.filter(
+                Q(name__icontains=query)
+                | Q(email__icontains=query)
+                | Q(usn__icontains=query)
+            )
+        return Response(
+            list(
+                people.order_by("name", "pk").values("id", "name", "email", "usn")[:50]
+            )
         )

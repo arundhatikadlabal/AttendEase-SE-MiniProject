@@ -1,8 +1,15 @@
 from django.urls import path
 
-from .views import CorrectionDecisionView, CorrectionSubmissionView
+from .views import (
+    CorrectionDecisionView,
+    CorrectionSubmissionView,
+    StudentCorrectionsView,
+)
 
 urlpatterns = [
+    path(
+        "corrections/mine", StudentCorrectionsView.as_view(), name="student-corrections"
+    ),
     path(
         "corrections/<int:correction_id>",
         CorrectionDecisionView.as_view(),

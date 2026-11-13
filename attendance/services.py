@@ -73,6 +73,9 @@ def student_session_history(student, *, from_date=None, to_date=None):
     )
     return [
         {
+            "record_id": session.student_records[0].pk
+            if session.student_records
+            else None,
             "session_id": session.pk,
             "date": session.date.isoformat(),
             "course_id": session.section.course_id,
